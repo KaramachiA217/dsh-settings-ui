@@ -57,9 +57,16 @@ const plugin = {
 
 ## 安装（挂进 profile）
 
-与普通客户端插件一致：单包、`cordis.patch.yml` 单行装配、`dsh.client` 声明、提交 `lib/`。
+与普通客户端插件一致：单包、`cordis.patch.yml` 单行装配、`dsh.client` 声明、提交 `lib/`。本包声明了 `dsh.bundle.patch`，是标准 bundle。**首选官方 CLI**（一步完成「加依赖 + 追加进 `dsh.profile.bundles`」，即官方手册的 tarball 安装流程）：
 
-1. 在 profile 的 `package.json` 加依赖（本地开发用 `link:` 指向源码目录或先 `npm pack` 出 tgz 用 `file:` 挂载）。
+```sh
+npm pack                        # 出 dsh-settings-ui-<ver>.tgz（含预构建 lib/，安装方零构建授权）
+dsh plugin --profile <name> add ./dsh-settings-ui-<ver>.tgz
+```
+
+等价的**手写 profile** 方式（与 CLI 产出的最终状态一致，二选一）：
+
+1. 在 profile 的 `package.json` 加依赖（`file:` 挂载 tgz；⚠️ rc.6 起 `link:` 会因 ESM 解析失败，一律用 tarball）。
 2. 在 `dsh.profile.bundles` 里加一行 `"dsh-settings-ui"`。
 3. `pnpm install`，然后硬刷新页面（client 改动无需重启）。
 

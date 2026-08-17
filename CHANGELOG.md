@@ -8,6 +8,12 @@
 
 - （暂无）
 
+## [0.2.20] - 2026-08-17
+
+### Docs
+
+- README 安装章节修订（中英同步）：官方 `dsh plugin --profile <name> add ./<tgz>` 列为首选，手写 profile 为等价备选；移除 rc.5 时代的 `link:` 与未发布的 `npm:` 安装建议（rc.6 起 `link:` ESM 解析失败，一律 `file:` tgz）。
+
 ## [0.2.19] - 2026-08-17
 
 ### Fixed

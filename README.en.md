@@ -8,15 +8,24 @@ DSH web plugin: a **unified settings-page UI kit + floating-panel kit**. It expo
 
 ## Install
 
+Standard bundle (declares `dsh.bundle.patch`). **Preferred: the official CLI** — pack a tarball and `add` it; the command installs the dependency and appends the bundle to `dsh.profile.bundles` in one step:
+
 ```bash
-npm i dsh-settings-ui
+npm pack                                   # -> dsh-settings-ui-<ver>.tgz (prebuilt lib/, no build permission needed)
+dsh plugin --profile <name> add ./dsh-settings-ui-<ver>.tgz
 ```
 
-Add it to the profile bundles (host provides the peers; consumers do **not** declare it as a peer dependency while it is host-provided):
+Equivalent manual profile edit (same end state, either path):
+
+1. Add the dependency to the profile's `package.json` (`file:` tarball; `link:` dev mounts fail ESM resolution on rc.6 — always use a tarball).
+2. Add `"dsh-settings-ui"` to `dsh.profile.bundles`.
+3. `pnpm install`, then hard-refresh the page (client changes need no restart).
+
+Host provides the peers; consumers do **not** declare it as a peer dependency while it is host-provided:
 
 ```json
 {
-  "dependencies": { "dsh-settings-ui": "npm:dsh-settings-ui" },
+  "dependencies": { "dsh-settings-ui": "file:./dsh-settings-ui-<ver>.tgz" },
   "dsh": { "profile": { "bundles": ["dsh-base", "dsh-web-app", "dsh-settings-ui", "..."] } }
 }
 ```
