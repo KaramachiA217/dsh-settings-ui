@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        node: [20, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0   # 家族 CI 统一 pnpm 10（pnpm 11 有 ERR_PNPM_IGNORED_BUILDS 陷阱）
+      - name: Install devDependencies (react/react-dom for unit tests)
+        run: pnpm install --no-frozen-lockfile
+        # --no-frozen: lockfile(9.0, pnpm11) 与 CI pnpm10 的 settings 校验互斥且本机
+        #   pnpm11 重生成会写回 settings.autoInstallPeers=true（与 .npmrc=false 冲突），
+        #   本地无法用 pnpm10 干净重锁；kit 依赖极简(react/react-dom) 确定性高，CI 现算即可。
+      - name: CI gate (syntax + unit tests + secret scan + sanitization + pack whitelist)
+        run: npm run ci
+      - name: Pack dry-run
+        run: npm pack --dry-run

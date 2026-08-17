@@ -1,0 +1,5 @@
+#!/bin/sh
+# dsh-settings-ui pre-commit gate: run the local CI before every commit.
+# Enabled via: git config core.hooksPath .githooks   (or `npm run hooks`)
+# Sandboxed agents: use `git commit --no-verify` after running `npm run ci` manually.
+node scripts/ci.mjs

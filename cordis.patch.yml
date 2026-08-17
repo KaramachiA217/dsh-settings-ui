@@ -1,0 +1,8 @@
+# dsh-settings-ui bundle patch: one insert row mounting the kit.
+#
+# The node half (exports ".") is an empty mount point; the browser half
+# (exports "./client", served at /plugins/dsh-settings-ui/client.js) provides
+# the `settingsUi` service that other plugins inject to build settings UI.
+- insert:
+    - id: settings-ui
+      name: 'dsh-settings-ui'
