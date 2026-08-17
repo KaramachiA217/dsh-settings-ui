@@ -248,3 +248,13 @@ window.__ModuleLoader__.load({
   },
 })
 ```
+
+---
+
+## Roadmap（未来规划）
+
+- **1.0.0 功能更新**：`ui.describeForm`（消费官方 `settings.describe` 的 schemastery schema → 自动渲染表单 + 用户覆盖标注 + `redactSecrets` 只写框 + revision 冲突处理）；内置 `settingsScope` 桥（`createSettingsStore` 官方 bind 默认实现）。
+- **工程补强**：`.d.ts` 与实现自动校验（公开发布后类型漂移风险升值）。
+- **能力边界（官方契约限制，kit 不做）**：侧栏平行席位（`sidebar.workspaces` / `sidebar.settings` 为单例槽）；浅色主题。
+- **已知限制（文档化）**：ToastHost 多实例同显（每插件只挂一个 host 即规避）。
+- **维护承诺**：上游 rc 漂移时按既定方法论重跑契约核对；反馈请走 GitHub 讨论区评论。

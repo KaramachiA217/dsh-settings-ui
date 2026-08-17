@@ -72,6 +72,14 @@ npm run ci              # 5-step gate: syntax + unit tests + secret scan + sanit
 npm test                # node:test unit tests (31)
 ```
 
+## Roadmap
+
+- **1.0.0**: `ui.describeForm` — consume the official `settings.describe` schemastery schema to auto-render forms, with user-override annotations, `redactSecrets` write-only inputs and revision-conflict handling; plus a built-in `settingsScope` bridge (default `createSettingsStore` binding to the official settings API).
+- **Engineering**: automated `.d.ts` ↔ implementation drift checks (type declarations matter more once published).
+- **Out of scope (official contract limits)**: parallel sidebar seats (`sidebar.workspaces` / `sidebar.settings` are singletons); light theme.
+- **Known limitation (documented)**: multiple `ToastHost` instances in one page show the same toast — mount one host per page.
+- **Maintenance commitment**: re-run the contract-diff methodology on upstream rc drift; feedback via GitHub discussions.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
