@@ -8,6 +8,12 @@
 
 - （暂无）
 
+## [0.2.22] - 2026-08-17
+
+### Changed
+
+- README 重构为 dsh-market 风格：**主 README.md 英文** + 新增 `README.zh.md` 中文（原 README.en.md 移除，npm/GitHub 均以英文为默认展示）；加 npm/stars 徽章。
+
 ## [0.2.21] - 2026-08-17
 
 ### Docs

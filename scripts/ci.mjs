@@ -47,7 +47,7 @@ const secretPat = /(sk-[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{30,}|ghp_[A-Za-z0-9]{30,}
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 // 实际扫描：仓库全部应追踪文件（直接枚举已知集合，避免依赖 git 子进程输出捕获）
 const scanFiles = [
-  'package.json', 'cordis.patch.yml', 'README.md', 'README.en.md', 'GUIDE.zh.md', 'CHANGELOG.md',
+  'package.json', 'cordis.patch.yml', 'README.md', 'README.zh.md', 'GUIDE.zh.md', 'CHANGELOG.md',
   'LICENSE', '.gitignore', '.npmrc', '.github/workflows/ci.yml',
   'lib/client.js', 'lib/index.js', 'lib/client.d.ts', 'lib/index.d.ts',
   'test/kit.test.mjs',
@@ -62,8 +62,8 @@ if (secretHits === 0) ok('扫描 ' + scanFiles.length + ' 个文件，零命中'
 
 // 4. 脱敏回归（发布物不携带本机专属信息）
 step('4/5 发布物脱敏回归')
-const pathPat = /(E:\\|E:\/|C:\\Users|127\.0\.0\.1:7897|PluginsDev|DesktopDev|KaramachiA217\/)/
-for (const f of ['README.md', 'GUIDE.zh.md', 'CHANGELOG.md', 'LICENSE']) {
+const pathPat = /(E:\\|E:\/|C:\\Users|127\.0\.0\.1:7897|PluginsDev|DesktopDev)/
+for (const f of ['README.md', 'README.zh.md', 'GUIDE.zh.md', 'CHANGELOG.md', 'LICENSE']) {
   const text = readFileSync(join(root, f), 'utf8')
   const m = text.match(pathPat)
   if (m) fail(f + ' 含本机专属信息：' + m[0])
@@ -72,7 +72,7 @@ for (const f of ['README.md', 'GUIDE.zh.md', 'CHANGELOG.md', 'LICENSE']) {
 
 // 5. npm files 白名单校验
 step('5/5 npm 打包白名单')
-const expectedFiles = ['lib', 'cordis.patch.yml', 'README.md', 'README.en.md', 'GUIDE.zh.md', 'CHANGELOG.md', 'LICENSE']
+const expectedFiles = ['lib', 'cordis.patch.yml', 'README.md', 'README.zh.md', 'GUIDE.zh.md', 'CHANGELOG.md', 'LICENSE']
 const actual = pkg.files ?? []
 if (JSON.stringify([...actual].sort()) !== JSON.stringify([...expectedFiles].sort())) {
   fail('files 白名单漂移：' + JSON.stringify(actual) + '（期望 ' + JSON.stringify(expectedFiles) + '）')
