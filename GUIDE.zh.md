@@ -1,4 +1,4 @@
-# dsh-settings-ui kit — 使用与开发手册（v0.2.18）
+# dsh-settings-ui kit — 使用与开发手册（v0.2.22）
 
 > 面向「用 kit 给 DSH Web/桌面端开发 UI」的完整手册。API 以本仓库 `lib/client.js` 为准；本文与代码不一致时以代码为准，并请更新本文。
 
