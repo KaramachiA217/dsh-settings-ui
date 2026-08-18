@@ -42,6 +42,10 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KaramachiA217/dsh-settings-ui.git"
+  },
   "engines": {
     "node": ">=20"
   },
