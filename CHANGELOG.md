@@ -8,6 +8,31 @@
 
 - （暂无）
 
+## [0.4.1] - 2026-08-20
+
+### Fixed
+
+- **官方卡模型字段改为「暂存 + 显式保存」**（store 新增 `stage()`：只置 dirty、不提交、不 busy；`pluginCard` official chrome 的字段输入走 stage，保存按钮 `commit` 统一写回，放弃修改 `refresh` 丢弃）——修复 0.4.0 误把 `setField`（=立即 commit）接在输入事件上造成的**即输即存**。
+- **card/pcard 相邻间距统一 10px**（`.sui-card + .sui-pcard` 等四组相邻规则）——修复 bm 行卡转 pcard 后与官方插件页卡距不一致（pcard 间 0px）。
+
+## [0.4.0] - 2026-08-20
+
+### Added（官方 UI 模型对齐 + 基元指针复用）
+
+- **`pluginCard` 官方卡壳模型（默认 `chrome:'official'`，对齐官方 `ui-settings-plugins` PluginCard）**：
+  - 收起 = `bg-layer-3` 亮面 + border-l2；展开 = **内部回到页面同色 `bg-layer-2` + 边框 `label-dimmed`**（官方「展开卡=正在被操作」语义）；
+  - 头部按钮整卡可点（name 15/600 叠 desc 13/tertiary），展开/收起 **官方 `IconChevronDownOutline14` 旋转过渡**；
+  - dirty 时头部「未保存」badge；body 顶部分割线**左右内缩 16px**（`margin:0 16px`）；
+  - footer 右对齐：放弃修改（描边+页面同色）/ 保存（**白底**），**禁用态 `opacity:.4`**；`defaultOpen` 选项（默认收起）。
+  - `chrome:'kit'|'minimal'` 保留 0.3.0 旧观感（旧测试/旧消费方不破）。
+- **官方字段模型**：`OfficialFields`/`OfficialFieldRow`（label 13/500 → 输入框 34px/层3/圆角8 → hint 12/tertiary；字段间 `border-top` 分割线；text/number 走官方模型，其余类型回退 kit Rows）。
+- **官方基元指针出口 `settingsUi.official`**：`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-primitives`（Cordise-free 纯 token：Button/Input/Menu/官方图标），原样暴露给消费方自由组合；注入失败（tests/旧内核）优雅降级 null。**不 import 官方卡 chrome**（bundle-purity 门禁）。
+- **通用组件对齐官方**：`sui-btn` 圆角 8/禁用 `opacity:.4`；`sui-input` 34px/圆角 8/层3 填充。
+
+### 其他
+
+- `test/kit.test.mjs`：官方 chrome 默认收起 / defaultOpen 字段+footer / dirty pending+保存启用 / kit chrome 回归 / content 自由出口 断言更新与新增；服务面完整性加 `OfficialFieldRow/OfficialFields/official`。
+
 ## [0.3.0] - 2026-08-20
 
 ### Added

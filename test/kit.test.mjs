@@ -30,6 +30,7 @@ const src = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
 // Real renderer for markup-level assertions (hooks work in SSR; useEffect
 // does not run, so focus-trap behavior stays covered by shell verification).
 const { renderToString } = createRequire(import.meta.url)('react-dom/server')
+const React = createRequire(import.meta.url)('react')
 
 // ---------------------------------------------------------------------------
 // Loaders / fakes
@@ -59,6 +60,14 @@ function loadBundle() {
   assert.ok(spec, 'bundle did not call window.__ModuleLoader__.load')
   const requireStub = (name) => {
     if (name === 'react') return createRequire(import.meta.url)('react')
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') {
+      // 0.4.0：官方基元指针 stub（kit 应优雅消费；图标渲染为 span）
+      return {
+        IconChevronDownOutline14: (props) => React.createElement('span', { className: 'stub-chevron', ...props }),
+        Button: (props) => React.createElement('button', props),
+        Input: (props) => React.createElement('input', props),
+      }
+    }
     throw new Error('unexpected require: ' + name)
   }
   return { plugin: spec.factory(requireStub), handlers }
@@ -140,7 +149,10 @@ function makeFakeScope(initial = {}) {
       user = { ...user, [field]: value }
       revision += 1
       status = 'ready'
-      for (const l of listeners) l()
+      // 异步投递（贴近真实 scope：wire 通知在微任务/事件循环送达）——
+      // 否则同步触发订阅会让「宿主快照不置 dirty」逻辑立即清掉 dirty，
+      // 测不到编辑窗口期。
+      queueMicrotask(() => { for (const l of listeners) l() })
       return undefined
     },
     async unset(field) {
@@ -149,7 +161,7 @@ function makeFakeScope(initial = {}) {
       user = next
       revision += 1
       status = 'ready'
-      for (const l of listeners) l()
+      queueMicrotask(() => { for (const l of listeners) l() })
       return undefined
     },
     async dispose() { return undefined },
@@ -215,8 +227,12 @@ test('service exposes the documented surface', () => {
     'Switch', 'Card', 'StatusDot', 'Badge', 'Spinner', 'List', 'ListItem',
     'Tabs', 'Banner', 'EmptyState', 'toast', 'ToastHost', 'useToast', 'Dialog', 'ErrorBoundary', 'Rows', 'createSettingsStore', 'useSettings',
     'Panel', 'createPanelStore', 'usePanel', 'section', 'overlay', 'pluginCard',
+    // 0.4.0：官方字段模型 + 官方基元指针出口
+    'OfficialFieldRow', 'OfficialFields', 'official',
   ]
   for (const n of names) assert.ok(service[n], `service.${n} missing`)
+  assert.ok(service.official, 'official primitives outlet present')
+  assert.equal(typeof service.official.IconChevronDownOutline14, 'function', 'official chevron icon exposed')
 })
 
 // ---------------------------------------------------------------------------
@@ -914,11 +930,12 @@ test('pluginCard showIn=both registers both the keyed card and a section', () =>
   assert.ok(slots.entries().find((x) => x.options.name === 'settings.section' && x.options.id === 'demo'))
 })
 
-test('pluginCard full chrome renders the kit shell with header + body (markup)', () => {
+test('pluginCard kit chrome renders the legacy kit shell with header + body (markup)', () => {
   const svc = makeScopeService({ enabled: true })
   const { service, slots } = makeService({ scopeSvc: svc })
   service.pluginCard({
     key: 'demo',
+    chrome: 'kit',
     header: { title: 'Demo 卡', desc: '一句话说明' },
     fields: [{ key: 'enabled', type: 'switch', label: '启用' }],
   })
@@ -930,11 +947,78 @@ test('pluginCard full chrome renders the kit shell with header + body (markup)',
   assert.match(html, /一句话说明/, 'header desc rendered')
 })
 
+test('pluginCard official chrome is the default and renders collapsed (header only)', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  service.pluginCard({
+    key: 'demo',
+    header: { title: 'Demo 卡', desc: '一句话说明' },
+    fields: [{ key: 'timeout', type: 'number', label: '超时' }],
+  })
+  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const html = renderToString(service.h(entry.render))
+  assert.match(html, /sui-pcard/, 'official card shell rendered')
+  assert.match(html, /sui-pcard-head/, 'disclosure header rendered')
+  assert.match(html, /Demo 卡/, 'name rendered')
+  assert.match(html, /一句话说明/, 'description rendered')
+  assert.doesNotMatch(html, /sui-pcard-body/, 'collapsed by default (no body)')
+  assert.doesNotMatch(html, /sui-pcard-open/, 'not open by default')
+})
+
+test('pluginCard official chrome defaultOpen renders fields + discard/save footer (markup)', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  service.pluginCard({
+    key: 'demo',
+    defaultOpen: true,
+    header: { title: 'Demo 卡', desc: '一句话说明' },
+    fields: [
+      { key: 'timeout', type: 'number', label: '命令超时（毫秒）', hint: '单条命令允许运行多久' },
+      { key: 'name', type: 'text', label: '名称' },
+    ],
+  })
+  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const html = renderToString(service.h(entry.render))
+  assert.match(html, /sui-pcard-open/, 'open state class applied')
+  assert.match(html, /sui-pcard-body/, 'body rendered when open')
+  assert.match(html, /sui-pfield/, 'official field rows rendered')
+  assert.match(html, /sui-pfield-input/, 'official inputs rendered')
+  assert.match(html, /命令超时（毫秒）/, 'field label rendered')
+  assert.match(html, /放弃修改/, 'discard button rendered')
+  assert.match(html, /保存/, 'save button rendered')
+  // 未 dirty：保存/放弃应 disabled（official 禁用态 opacity .4 由 CSS 承担）
+  assert.match(html, /sui-pcard-save[^>]*disabled/, 'save disabled when clean')
+  assert.match(html, /sui-pcard-discard[^>]*disabled/, 'discard disabled when clean')
+})
+
+test('pluginCard official chrome dirty state: pending badge + staged value + save enabled', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  const result = service.pluginCard({
+    key: 'demo',
+    defaultOpen: true,
+    header: { title: 'Demo 卡' },
+    fields: [{ key: 'timeout', type: 'number', label: '超时' }],
+  })
+  assert.ok(result, 'card registered')
+  // 0.4.0：官方模型 = stage 暂存（只置 dirty，不 commit、不 busy）——保存按钮
+  // 应启用；放弃修改 refresh 丢弃。
+  result.store.stage({ timeout: '123' })
+  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const html = renderToString(service.h(entry.render))
+  assert.match(html, /sui-pcard-pending/, 'dirty pending badge rendered on header')
+  assert.match(html, /未保存/, 'pending badge copy rendered')
+  assert.match(html, /value="123"/, 'staged value rendered')
+  assert.doesNotMatch(html, /sui-pcard-save[^>]*disabled/, 'save enabled when dirty (staged)')
+  assert.doesNotMatch(html, /sui-pcard-discard[^>]*disabled/, 'discard enabled when dirty (staged)')
+})
+
 test('pluginCard content free exit takes precedence over fields', () => {
   const svc = makeScopeService()
   const { service, slots } = makeService({ scopeSvc: svc })
   service.pluginCard({
     key: 'demo',
+    defaultOpen: true,
     fields: [{ key: 'a', type: 'switch', label: '忽略我' }],
     content: () => service.h('div', { className: 'custom-exit' }, '自定义内容'),
   })

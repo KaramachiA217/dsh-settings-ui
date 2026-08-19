@@ -7,6 +7,7 @@
  * and this file must be updated (version sync is asserted by test/).
  */
 import type * as React from 'react'
+import type * as OfficialPrimitives from '@deepseek-ai/dsh-client-ui-primitives'
 
 export type ButtonKind = 'primary' | 'secondary' | 'danger'
 export type BadgeTone = 'info' | 'success' | 'warn' | 'error' | 'neutral'
@@ -347,7 +348,7 @@ export interface PluginCardContext {
 }
 
 export type PluginCardShowIn = 'official-tab' | 'settings-page' | 'both'
-export type PluginCardChrome = 'full' | 'minimal'
+export type PluginCardChrome = 'official' | 'kit' | 'minimal'
 
 export interface PluginCardConfig {
   /** Required = settings namespace = the official tab dispatch key. */
@@ -356,16 +357,23 @@ export interface PluginCardConfig {
   order?: number
   /** Dictionary namespace id forwarded to the slot registration. */
   locale?: string
-  /** Kit-rendered card head. */
+  /** Card head (title over description, official model). */
   header?: PluginCardHeader
-  /** Kit Rows form (recommended). */
+  /** Declarative form: text/number fields render as official-model rows; other types fall back to kit Rows. */
   fields?: RowField[]
   /** Free content exit; receives { ui, store, scope, key }. */
   content?: (ctx: PluginCardContext) => React.ReactNode
   /** Where the card lands. Default 'official-tab'. */
   showIn?: PluginCardShowIn
-  /** 'minimal' drops the kit card shell. Default 'full'. */
+  /**
+   * Card chrome. Default 'official' = official PluginCard model (collapsed
+   * layer-3 surface → expanded page-color interior, disclosure header with
+   * official chevron, field dividers, discard/save footer, opacity .4
+   * disabled). 'kit' = the 0.3.0 kit shell; 'minimal' = kit content only.
+   */
   chrome?: PluginCardChrome
+  /** Official chrome: render expanded on first mount (default collapsed). */
+  defaultOpen?: boolean
   /** Optional fenced fallback transport for 'settings-page' without scope. */
   api?: SettingsApi
 }
@@ -375,6 +383,22 @@ export interface PluginCardResult {
   store: SettingsStore
   scope: SettingsScope | null
   showIn: PluginCardShowIn
+}
+
+/** 0.4.0: one official-model field row. */
+export interface OfficialFieldRowProps {
+  field: RowField
+  value?: unknown
+  onEdit?: (key: string, value: string) => void
+  disabled?: boolean
+}
+
+/** 0.4.0: official-model field stack. */
+export interface OfficialFieldsProps {
+  fields: RowField[]
+  values?: Record<string, unknown>
+  onEdit?: (key: string, value: unknown) => void
+  disabled?: boolean
 }
 
 export interface SettingsUi {
@@ -413,6 +437,18 @@ export interface SettingsUi {
   Panel: React.ComponentType<PanelProps>
   createPanelStore(options?: PanelStoreOptions): PanelStore
   usePanel(store: PanelStore): PanelState
+  /** 0.4.0 official-model field row (label/input/hint + field+field dividers). */
+  OfficialFieldRow: React.ComponentType<OfficialFieldRowProps>
+  /** 0.4.0 official-model field stack (text/number → official rows; others → kit Rows). */
+  OfficialFields: React.ComponentType<OfficialFieldsProps>
+  /**
+   * 0.4.0 pointer outlet to the official primitives module
+   * (`@deepseek-ai/dsh-client-ui-primitives`: Button/Input/Menu/官方图标…).
+   * Null when the official module is not injectable (tests/older kernels).
+   * Consumers compose official components directly:
+   * `ctx.settingsUi.official?.Button`, `?.IconChevronDownOutline14`, …
+   */
+  official: typeof OfficialPrimitives | null
   /** Register a settings-page section (convenience path). */
   section(config: SectionConfig): unknown
   /** Register a floating surface on the frame-wide `shell.overlay` slot (freedom path). */
