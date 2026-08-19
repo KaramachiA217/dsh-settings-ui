@@ -95,7 +95,7 @@ function makeFakeSlots() {
   }
 }
 
-function makeService() {
+function makeService(opts = {}) {
   const slots = makeFakeSlots()
   let provided = null
   // Official locale service face (dictionary registration is third-party
@@ -103,10 +103,72 @@ function makeService() {
   const registeredDicts = []
   const locale = { register: (ns, dicts) => { registeredDicts.push({ ns, dicts }) } }
   const loaded = loadBundle()
-  const ctx = { provide: (key, value) => { provided = { key, value } }, slots, locale }
+  // Fake ctx.get: resolve settingsScope only when a scope service is supplied
+  // (pluginCard probes it as an optional service; never inject-hard).
+  const scopeSvc = opts.scopeSvc ?? null
+  const ctx = {
+    provide: (key, value) => { provided = { key, value } },
+    slots,
+    locale,
+    get: (name) => (name === 'settingsScope' ? scopeSvc : undefined),
+  }
   loaded.plugin.apply(ctx)
   assert.equal(provided?.key, 'settingsUi', 'apply must provide settingsUi')
-  return { service: provided.value, slots, registeredDicts, winHandlers: loaded.handlers }
+  return { service: provided.value, slots, registeredDicts, winHandlers: loaded.handlers, ctx }
+}
+
+/**
+ * A controlled official-settingsScope look-alike (rc7): snapshot store with
+ * { status, value, base, user, revision, writable, mode } + save-as-you-go
+ * set/unset. The kit's scope backend consumes exactly this surface and MUST
+ * NOT depend on revision-conflict throws (the official scope swallows write
+ * failures and recovers itself — calibration note 2).
+ */
+function makeFakeScope(initial = {}) {
+  const listeners = new Set()
+  let user = { ...initial }
+  let revision = 1
+  let status = 'ready'
+  const snap = () => ({ status, value: user, base: {}, user, revision, writable: true, mode: 'host' })
+  const isConflict = () => revision === 99 // reserved: flip to force unavailable
+  return {
+    getSnapshot: snap,
+    subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
+    async load() { return undefined },
+    async set(field, value) {
+      if (isConflict()) { status = 'unavailable'; for (const l of listeners) l(); return undefined }
+      user = { ...user, [field]: value }
+      revision += 1
+      status = 'ready'
+      for (const l of listeners) l()
+      return undefined
+    },
+    async unset(field) {
+      const next = { ...user }
+      delete next[field]
+      user = next
+      revision += 1
+      status = 'ready'
+      for (const l of listeners) l()
+      return undefined
+    },
+    async dispose() { return undefined },
+    __user: () => user,
+    __revision: () => revision,
+  }
+}
+
+/** A settingsScope binder look-alike for ctx.get('settingsScope'). */
+function makeScopeService(initial = {}) {
+  let last = null
+  return {
+    bind(spec) {
+      const scope = makeFakeScope(initial)
+      last = { spec, scope }
+      return scope
+    },
+    __last: () => last,
+  }
 }
 
 function makeStorage() {
@@ -152,7 +214,7 @@ test('service exposes the documented surface', () => {
     'h', 'SectionHeader', 'Field', 'TextInput', 'TextArea', 'Select', 'Button',
     'Switch', 'Card', 'StatusDot', 'Badge', 'Spinner', 'List', 'ListItem',
     'Tabs', 'Banner', 'EmptyState', 'toast', 'ToastHost', 'useToast', 'Dialog', 'ErrorBoundary', 'Rows', 'createSettingsStore', 'useSettings',
-    'Panel', 'createPanelStore', 'usePanel', 'section', 'overlay',
+    'Panel', 'createPanelStore', 'usePanel', 'section', 'overlay', 'pluginCard',
   ]
   for (const n of names) assert.ok(service[n], `service.${n} missing`)
 })
@@ -685,3 +747,200 @@ test('ErrorBoundary: componentDidCatch logs stack to console by default (0.2.19)
     console.error = orig
   }
 })
+
+// ---------------------------------------------------------------------------
+// 12. 0.3.0：createSettingsStore settingsScope 后端（rc.7 对齐，校准注 1/2）
+// ---------------------------------------------------------------------------
+
+test('scope backend: refresh reads the scope snapshot into doc/revision', async () => {
+  const { service } = makeService()
+  const scope = makeFakeScope({ enabled: true, timeout: 5 })
+  const store = service.createSettingsStore(scope)
+  assert.equal(store.get().loaded, false)
+  assert.equal(typeof store.setField, 'function', 'scope backend exposes setField')
+  assert.equal(typeof store.load, 'function', 'scope backend exposes load')
+  await store.refresh()
+  const s = store.get()
+  assert.equal(s.loaded, true)
+  assert.equal(s.revision, 1)
+  assert.equal(s.doc.enabled, true)
+  assert.equal(s.doc.timeout, 5)
+  assert.equal(s.error, '')
+})
+
+test('scope backend: setField persists via scope.set and maps into the state machine', async () => {
+  const { service } = makeService()
+  const scope = makeFakeScope({ enabled: true })
+  const store = service.createSettingsStore(scope)
+  await store.refresh()
+  store.set({ doc: { enabled: true } })
+  assert.equal(store.get().dirty, true, 'consumer edit marks dirty')
+  const ok = await store.setField('enabled', false)
+  assert.equal(ok, true, 'scope-backed commit resolves true')
+  assert.deepEqual(scope.__user(), { enabled: false }, 'scope user layer written')
+  const s = store.get()
+  assert.equal(s.doc.enabled, false)
+  assert.equal(s.revision, 2, 'write bumped the namespace revision')
+  assert.equal(s.dirty, false, 'successful save clears dirty')
+  assert.equal(s.saved, true, 'saved flashes after scope write')
+  assert.equal(s.busy, false)
+})
+
+test('scope backend: unsetField removes the field back to the composition layer', async () => {
+  const { service } = makeService()
+  const scope = makeFakeScope({ enabled: true, timeout: 5 })
+  const store = service.createSettingsStore(scope)
+  await store.refresh()
+  const ok = await store.unsetField('timeout')
+  assert.equal(ok, true)
+  assert.deepEqual(scope.__user(), { enabled: true }, 'field removed from the user layer')
+  assert.equal(store.get().doc.timeout, undefined)
+})
+
+test('scope backend: host snapshot subscription updates doc without dirty (save-as-you-go)', async () => {
+  const { service } = makeService()
+  const scope = makeFakeScope({ a: 1 })
+  const store = service.createSettingsStore(scope)
+  store.set({ doc: { a: 1 } })        // simulate a local edit → dirty
+  assert.equal(store.get().dirty, true)
+  await scope.set('a', 2)             // host lands a reply (revision bump + notify)
+  assert.equal(store.get().doc.a, 2)
+  assert.equal(store.get().dirty, false, 'host reply is not a local edit')
+  assert.equal(store.get().revision, 2)
+})
+
+test('createSettingsStore rejects a transport that is neither fenced api nor scope', () => {
+  const { service } = makeService()
+  assert.throws(() => service.createSettingsStore({}), /dsh-settings-ui/)
+})
+
+// ---------------------------------------------------------------------------
+// 13. 0.3.0：settingsUi.pluginCard（rc.7 keyed 卡；key 护栏 / 注册契约 / markup）
+// ---------------------------------------------------------------------------
+
+test('pluginCard registers a keyed settings.plugin.item entry with registrant marker', () => {
+  const svc = makeScopeService({ enabled: true })
+  const { service, slots } = makeService({ scopeSvc: svc })
+  const result = service.pluginCard({ key: 'demo', header: { title: 'Demo' } })
+  assert.ok(result, 'pluginCard resolves with scope present')
+  assert.equal(result.key, 'demo')
+  assert.equal(result.showIn, 'official-tab')
+  const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  assert.ok(e, 'keyed entry registered under settings.plugin.item')
+  assert.equal(e.options.registrant, 'dsh-settings-ui', 'registrant marker feeds the stats card')
+  assert.equal(e.options.locale, undefined)
+})
+
+test('pluginCard forwards a locale namespace to the slot registration', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  service.pluginCard({ key: 'demo', locale: 'settings.demo' })
+  const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  assert.equal(e.options.locale, 'settings.demo')
+})
+
+test('pluginCard rejects a key that fails the ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$ whitelist', () => {
+  const warnings = []
+  const orig = console.warn
+  console.warn = (...a) => warnings.push(a)
+  try {
+    const svc = makeScopeService()
+    const { service, slots } = makeService({ scopeSvc: svc })
+    assert.equal(service.pluginCard({ key: 'Bad Key!', header: {} }), null, 'invalid key rejected')
+    const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'Bad Key!')
+    assert.ok(!e, 'no entry registered for an invalid key')
+    assert.equal(warnings.length, 1, 'a clear warning is emitted')
+    assert.match(String(warnings[0][0]), /非法 key/)
+  } finally {
+    console.warn = orig
+  }
+})
+
+test('pluginCard rejects a duplicate key with a self-protection warning', () => {
+  const warnings = []
+  const orig = console.warn
+  console.warn = (...a) => warnings.push(a)
+  try {
+    const svc = makeScopeService()
+    const { service, slots } = makeService({ scopeSvc: svc })
+    service.pluginCard({ key: 'dup' })
+    const before = slots.entries().filter((x) => x.options.name === 'settings.plugin.item').length
+    assert.equal(service.pluginCard({ key: 'dup' }), null, 'duplicate key rejected')
+    const after = slots.entries().filter((x) => x.options.name === 'settings.plugin.item').length
+    assert.equal(after, before, 'no second entry for a duplicate key')
+    assert.equal(warnings.length, 1)
+    assert.match(String(warnings[0][0]), /已在 settings.plugin.item 占位/)
+  } finally {
+    console.warn = orig
+  }
+})
+
+test('pluginCard official-tab path bails with a diagnostic when settingsScope is absent', () => {
+  const errors = []
+  const orig = console.error
+  console.error = (...a) => errors.push(a)
+  try {
+    // No scopeSvc supplied → ctx.get('settingsScope') resolves undefined.
+    const { service, slots } = makeService()
+    assert.equal(service.pluginCard({ key: 'headless' }), null)
+    const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'headless')
+    assert.ok(!e, 'no official-tab card registered without settingsScope')
+    assert.equal(errors.length, 1, 'a diagnostic error is emitted')
+    assert.match(String(errors[0][0]), /settingsScope 服务缺席/)
+    assert.match(String(errors[0][0]), /无法经官方设置面持久化/, 'says what is missing and the consequence')
+  } finally {
+    console.error = orig
+  }
+})
+
+test('pluginCard showIn=settings-page registers settings.section instead (compat path)', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  const result = service.pluginCard({ key: 'demo', showIn: 'settings-page', order: 7, header: { title: 'Demo' } })
+  assert.ok(result)
+  const s = slots.entries().find((x) => x.options.name === 'settings.section' && x.options.id === 'demo')
+  assert.ok(s, 'settings-page lands on settings.section')
+  assert.equal(s.options.order, 7)
+  assert.equal(s.options.registrant, 'dsh-settings-ui')
+  const k = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  assert.ok(!k, 'settings-page must not also register the keyed card')
+})
+
+test('pluginCard showIn=both registers both the keyed card and a section', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  assert.ok(service.pluginCard({ key: 'demo', showIn: 'both' }))
+  assert.ok(slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo'))
+  assert.ok(slots.entries().find((x) => x.options.name === 'settings.section' && x.options.id === 'demo'))
+})
+
+test('pluginCard full chrome renders the kit shell with header + body (markup)', () => {
+  const svc = makeScopeService({ enabled: true })
+  const { service, slots } = makeService({ scopeSvc: svc })
+  service.pluginCard({
+    key: 'demo',
+    header: { title: 'Demo 卡', desc: '一句话说明' },
+    fields: [{ key: 'enabled', type: 'switch', label: '启用' }],
+  })
+  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const html = renderToString(service.h(entry.render))
+  assert.match(html, /sui-plugincard/, 'kit card shell rendered')
+  assert.match(html, /sui-plugincard-body/, 'content body rendered')
+  assert.match(html, /Demo 卡/, 'header title rendered')
+  assert.match(html, /一句话说明/, 'header desc rendered')
+})
+
+test('pluginCard content free exit takes precedence over fields', () => {
+  const svc = makeScopeService()
+  const { service, slots } = makeService({ scopeSvc: svc })
+  service.pluginCard({
+    key: 'demo',
+    fields: [{ key: 'a', type: 'switch', label: '忽略我' }],
+    content: () => service.h('div', { className: 'custom-exit' }, '自定义内容'),
+  })
+  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const html = renderToString(service.h(entry.render))
+  assert.match(html, /custom-exit/, 'content free exit rendered')
+  assert.match(html, /自定义内容/)
+})
+

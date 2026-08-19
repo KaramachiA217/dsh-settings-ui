@@ -19,23 +19,40 @@ DSH Web 插件：**统一设置页 UI kit + 浮层面板 kit**。对外暴露 `c
 
 - **已验证**：dsh **0.1.0-rc.5**（官方壳全套，desktop / desktop-dev profile 实测，含 framework-only bundles 挂载）。
 - **rc.6（2026-08-17 已验证）**：kit 0.2.18 tarball 在 rc.6 双链路实测通过——桌面端（`rc6-min` profile，13648）+ web 端（`rc6-web` profile，3090）bundles 直挂：**源码同 commit 铁证**（上游 master = rc6 npm 构建提交 = rc5 checkout HEAD，`47f9438`）+ 契约面核对一致（React 18.3.1 / `--dsw-alias-*` / slots ledger / `installLocale` / `locale.register`）+ 冷启动零错误 + bundle 实核 + UI 手测通过。rc.6 下 `link:` 开发挂载 ESM 解析失败，必须 tarball。
+- **rc.7（0.3.0，2026-08-20）**：`pluginCard()` 面向 rc7 的 keyed `settings.plugin.item` 槽 + 官方 `ctx.settingsScope`（保存即生效、revision 栅栏由官方保证）。经典面（`settings.section` / `settings.general.item` / `shell.overlay`）在 rc7 未变，`section()`/`overlay()` 照常工作。`pluginCard()` 是 rc7 时代的路径，新品配置卡建议走它。
 - 未列出的版本组合未验证，不声明兼容。
 
-## 两级 API 速选（便捷 vs 自由）
+## 三级 API 速选（便捷 vs 自由）
 
-kit 是「通用 UI 注册入口」：**同一套原子组件 + `sui-*` 样式 + 状态**，按诉求分两级用——
+kit 是「通用 UI 注册入口」：**同一套原子组件 + `sui-*` 样式 + 状态**，按诉求分三级用——
 
 | 诉求 | 用哪个 | 一句话 |
 |---|---|---|
-| 在**设置页**加一张配置卡片 | `ui.section(config)`（**便捷**） | 声明 `{ id, order, label, render, inject? }`，自动包 `.sui-root` 根 + 共享样式 + 统计卡计数 |
+| 在**官方「插件配置」Tab**放一张配置卡（rc7 范式，经 `settingsScope` 保存） | `ui.pluginCard(config)`（**rc7 便捷**） | 声明 `{ key, header?, fields?, content?, showIn?, chrome? }`，keyed `settings.plugin.item` + 官方 scope 后端，kit 渲染卡壳 |
+| 在**设置页**加一张配置卡片（传统/rc6 回退） | `ui.section(config)`（**便捷**） | 声明 `{ id, order, label, render, inject? }`，自动包 `.sui-root` 根 + 共享样式 + 统计卡计数 |
 | 在**窗口最前层级**开自己的浮窗（可拖拽 / 最小化 / 置顶 / 位置持久化） | `ui.overlay(config)` + `ui.Panel` + `ui.createPanelStore`（**自由**） | 注册 `shell.overlay` 浮层；`Panel` 给 chrome；`createPanelStore({ persist })` 管开合/位置/置顶 |
 
-- **便捷** = 设置页卡片，适合「配置类」插件（proxy / mcp / search / skill / task-board 的设置卡）。
+- **rc7 便捷** = 官方「插件配置」Tab 卡，保存由官方 `settingsScope` 承担（save-as-you-go、revision 栅栏）。
+- **便捷** = 设置页卡片，适合「配置类」插件（proxy / mcp / search / skill 的设置卡）。
 - **自由** = 任意浮窗，适合「伴随式」插件（桌面助手 / 会话伴侣 / 搜索面板），位置与最小化可 `persist` 到 localStorage。
-- 两级**共享**原子组件（`SectionHeader` / `Field` / `Card` / `Button` / `Switch` / `Rows` …）与 `sui-*` 样式；`h` = `React.createElement`。
+- 三级**共享**原子组件（`SectionHeader` / `Field` / `Card` / `Button` / `Switch` / `Rows` …）与 `sui-*` 样式；`h` = `React.createElement`。
 - 需要「加载/保存/busy/error/revision」就用 `ui.createSettingsStore` + `ui.useSettings`（见 §3）。
 
-**便捷最小骨架**（设置页卡片）见下方「快速示例（完整插件）」。
+**rc7 便捷最小骨架**（官方插件配置 Tab 卡）：
+
+```js
+const card = ui.pluginCard({
+  key: 'my-plugin',                 // 必填：settings 命名空间 = Tab 派发键
+  header: { title: '我的插件', desc: '一句话说明' },
+  fields: [
+    { key: 'enabled', type: 'switch', label: '启用' },
+    { key: 'endpoint', type: 'text', label: '服务地址' },
+  ],
+})
+// card.store（settingsScope 后端）：每个字段编辑即经 scope.set/unset 持久化
+```
+
+**设置页便捷最小骨架**（`section()`）见下方「快速示例（完整插件）」。
 
 **自由最小骨架**（浮窗）：
 
@@ -161,11 +178,39 @@ ui.section({
 
 `render` 是**组件**（内部可调 `ui.useSettings` 等 hook），`section()` 会包上统一的 `.sui-root` 根并注入共享样式。
 
+### 4.5 注册官方「插件配置」Tab 卡 `ui.pluginCard(config)`（rc7，v0.3.0）
+
+rc7 官方教程 `adding-a-settings-card` 的新范式 = **插件配置 Tab 卡**（keyed `settings.plugin.item` 按 settings 命名空间派发），持久化走官方 `ctx.settingsScope`（保存即生效、revision 栅栏、key 的 **presence** 标记覆盖）。`pluginCard()` 把「scope 绑定 + 状态机 + 卡壳」一次性封装好：
+
+```js
+const card = ui.pluginCard({
+  key: 'my-plugin',                 // 必填：settings 命名空间 = Tab 派发键（白名单 ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$）
+  order: 10,                        // 可选：聚合层排序（keyed 槽自身无 order）
+  locale: 'settings.myPlugin',      // 可选：透传 slot 字典 ns
+  header: { title: '我的插件', desc: '一句话说明', meta: 'v1.0' },  // kit 渲染的卡头
+  fields: [                         // 推荐：kit Rows 声明式表单
+    { key: 'enabled', type: 'switch', label: '启用' },
+  ],
+  // 或 content: (ctx) => <element>  自由内容出口（ctx = { ui, store, scope, key }）
+  showIn: 'official-tab',           // 'official-tab' | 'settings-page' | 'both'
+  chrome: 'full',                   // 'full'（kit 卡壳）| 'minimal'（只内容）
+  api: { get, update },             // 可选：settings-page 无 scope 时的 fenced 回退
+})
+// card = { key, store, scope, showIn }；card.store 为 settingsScope 后端
+//   store.setField('enabled', false)  直接保存（save-as-you-go）
+//   store.unsetField('enabled')       清回 composition 层
+```
+
+- **传输** = `ctx.settingsScope.bind({ namespace: key })`：保存即生效、revision 栅栏与冲突恢复**由官方 scope 保证，kit 不重造**（校准注：勿把 host 侧 `settings.watch`/`applies:'restart'` 范式套到 `pluginCard`/`settingsScope`）。
+- **`settingsScope` 是可选服务**（kit 用 `ctx.get('settingsScope')` 探测，**不进 inject 硬依赖**）：headless/无官方设置面缺席时，official-tab 路径给出清晰诊断（说明缺了什么、后果是什么）并拒绝注册；settings-page 路径可回退 fenced `api`。
+- **self-protection**：`key` 白名单校验 + 重复 key 先自查告警拒绝（官方 keyed 覆盖语义的自我保护）。
+- 卡壳由 kit 渲染（卡头/内容区/状态条），内容走 `fields` Rows 或 `content` 自由出口——对未来「统一管理 + 用户自定义壳」的能力位，靠服务/子槽注入，不 import 官方组件源码（对齐三原则）。
+
 ### 5. 通用设置统计卡（自动）
 
 > ⚠ **侧栏入口局限**：官方侧栏只有 `sidebar.footer.action` 一个**可叠加**槽（`sidebar.workspaces` / `sidebar.settings` 都是单例槽），所以插件想在侧栏加「独立图标席位 / 平行工作位 / 额外设置入口」当前做不到，只能往底部动作区追加（task-board 入口即走此槽）。设置页内容（`settings.section`）与浮层（`shell.overlay`）则完全可自由叠加。详见 [GUIDE.zh.md §4b](./GUIDE.zh.md)「官方槽位边界与已知局限」。
 
-kit 会在「设置 → 通用设置」自动注册一张卡片：显示当前通过 `ui.section()` **与 `ui.overlay()`** 接入的配置界面总数，**点击卡片展开**可查看具体插件名（导航文案 + id，浮层带「浮层」前缀）与 kit 版本号。计数实时跟随注册/卸载（`section()`/`overlay()` 注册时以 `registrant: 'dsh-settings-ui'` 标记 ledger 条目，统计卡按该标记过滤——ledger 只保留白名单字段，`registrant` 是其中之一）。**卡片文案跟随官方 locale 服务**（kit 注册 `dsh-settings-ui` 字典命名空间，zh/en；locale 缺席时退回内置中文），消费方无需做任何事。
+kit 会在「设置 → 通用设置」自动注册一张卡片：显示当前通过 `ui.section()`、**`ui.overlay()` 与 `ui.pluginCard()`**（v0.3.0 起并入）接入的配置界面总数，**点击卡片展开**可查看具体插件名（导航文案 + id，浮层带「浮层」前缀，pluginCard 显示其 key）与 kit 版本号。计数实时跟随注册/卸载（`section()`/`overlay()`/`pluginCard()` 注册时以 `registrant: 'dsh-settings-ui'` 标记 ledger 条目，统计卡按该标记过滤——ledger 只保留白名单字段，`registrant` 是其中之一）。**卡片文案跟随官方 locale 服务**（kit 注册 `dsh-settings-ui` 字典命名空间，zh/en；locale 缺席时退回内置中文），消费方无需做任何事。
 
 ### 6. 浮层面板（v0.2）：`ui.overlay` + `ui.Panel` + `ui.createPanelStore`
 
@@ -254,8 +299,18 @@ window.__ModuleLoader__.load({
 
 ## Roadmap（未来规划）
 
-- **1.0.0 功能更新**：`ui.describeForm`（消费官方 `settings.describe` 的 schemastery schema → 自动渲染表单 + 用户覆盖标注 + `redactSecrets` 只写框 + revision 冲突处理）；内置 `settingsScope` 桥（`createSettingsStore` 官方 bind 默认实现）。
+- **1.0.0 功能更新**：`ui.describeForm`（消费官方 `settings.describe` 的 schemastery schema → 自动渲染表单 + 用户覆盖标注 + `redactSecrets` 只写框 + revision 冲突处理），构建在**已落地的 `settingsScope` 后端**之上。
 - **工程补强**：`.d.ts` 与实现自动校验（公开发布后类型漂移风险升值）。
 - **能力边界（官方契约限制，kit 不做）**：侧栏平行席位（`sidebar.workspaces` / `sidebar.settings` 为单例槽）；浅色主题。
 - **已知限制（文档化）**：ToastHost 多实例同显（每插件只挂一个 host 即规避）。
 - **维护承诺**：上游 rc 漂移时按既定方法论重跑契约核对；反馈请走 GitHub 讨论区评论。
+
+---
+
+## 家族单轨说明（rc.7 对齐）
+
+rc7 官方把「配置卡上车」让给其**插件配置 Tab**（keyed `settings.plugin.item`，官方教程 `adding-a-settings-card` 已不再提 `settings.section`）。kit 的定位随之升级为「官方范式之上的加速层」：
+
+- **新品配置界面一律走 `ui.pluginCard()`（官方 Tab）**——统一 keyed 卡 + `settingsScope` 轨道，避免「设置页一半、插件 Tab 一半」的两轨碎片化。
+- **存量 `section()` 仍完全支持，无需迁移**（rc6 环境/传统设置页/headless 回退照常可用）。
+- **对齐三原则**：①契约层只用官方槽/服务（`settings.plugin.item` / `settings.section` / `shell.overlay` / `settingsScope` / `locale`），绝不平行另造 settings 表面或 allowlist；②视觉层 `.sui-*` 全部解析自官方 token（`--dsw-alias-*` / `--ds-font-family-code` / `--dsh-sidebar-width`），硬编码仅作 token 缺失兜底；③代码层不 import 官方卡 chrome（client bundle 纯度门禁值导入），对齐靠契约+token+观感，卡壳/表单/状态机/a11y kit 自建但 token 对齐。

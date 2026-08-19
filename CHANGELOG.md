@@ -8,6 +8,27 @@
 
 - （暂无）
 
+## [0.3.0] - 2026-08-20
+
+### Added
+
+- **`settingsUi.pluginCard(options)`**（rc.7 对齐，新增公开 API → minor）：在官方「插件配置」keyed `settings.plugin.item` 槽注册一张按 settings 命名空间派发的卡。`key`（必填，= settings 命名空间 = Tab 派发键，白名单 `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`）、`order?`/`locale?`/`header?`/`fields?`/`content?`/`showIn?`（`official-tab`/`settings-page`/`both`，默认 `official-tab`）/`chrome?`（`full`/`minimal`）。卡壳由 kit 渲染（卡头/内容区/状态条），内容走 `fields` Rows 或 `content` 自由出口——对齐「卡壳-内容子槽」架构。
+- **`createSettingsStore` 增 settingsScope 后端**：可直接传 `ctx.settingsScope.bind({ namespace })` handle（save-as-you-go set/unset，revision 栅栏由官方 scope 保证，kit 不重造）。状态机不变（`dirty`/`saved`/`commit` 结果透传/settings-conflict 呈现保留）；fenced `{ get, update }` 后端保留（rc6 回退）。scope 后端额外暴露 `setField`/`unsetField`/`load`。
+- **关键 self-protection**：`pluginCard` 注册前对 `key` 做重复护栏（查 `settings.plugin.item` 已占位则 warn+拒绝）与白名单校验；`settingsScope` 用 `ctx.get('settingsScope')` 探测（**不进 inject 硬依赖**，headless/无设置面缺席时给出清晰诊断并拒绝 official-tab 路径）。
+- 通用设置统计卡并入 `pluginCard` 注册数（与 section/overlay 同款 `registrant` 过滤）。
+
+### Changed
+
+- **家族单轨说明**：新品配置界面建议走 `pluginCard()` 官方 Tab（rc7 范式，`settings.section` 已不再是官方教程入口）；存量 `section()` 仍支持（rc6 环境回退/传统设置页）。避免「设置页一半、插件 Tab 一半」两轨碎片化。详见 README/GUIDE。
+- 版本 bump：0.2.22 → **0.3.0**（新增公开 API）。
+
+### Docs
+
+- README（中/英）：`pluginCard()` 用法 + 「对齐三原则」说明 + 兼容矩阵补 **rc5/rc6/rc7 三行** + Roadmap 更新（pluginCard 落地；`1.0.0 = describeForm/settingsScope` 继续）。
+- GUIDE.zh.md：`pluginCard`/scope 后端 API 参考、统计卡并入说明、单轨取舍。
+- kit HANDOFF：对齐三原则 + 架构新增（scope 后端 / 卡壳-内容子槽）+ 踩坑；DEVBOARD 勾选进度。
+
+
 ## [0.2.22] - 2026-08-17
 
 ### Changed

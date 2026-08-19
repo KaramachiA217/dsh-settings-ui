@@ -202,6 +202,31 @@ export interface SettingsApi {
   update?: (payload: any) => Promise<any>
 }
 
+/** Official `ctx.settingsScope.bind({ namespace })` snapshot (rc7). */
+export interface SettingsScopeSnapshot {
+  status: 'loading' | 'ready' | 'unavailable'
+  value: any
+  base: unknown
+  user: unknown
+  /** Namespace revision fencing the next write. */
+  revision: number | undefined
+  writable: boolean
+  mode: 'host' | 'memory'
+}
+
+/**
+ * A settingsScope handle bound via `ctx.settingsScope.bind({ namespace })`.
+ * Save-as-you-go: `set`/`unset` persist immediately with revision fencing
+ * owned by the official scope (the kit never re-implements it).
+ */
+export interface SettingsScope {
+  getSnapshot(): SettingsScopeSnapshot
+  subscribe(listener: () => void): () => void
+  load(): Promise<void>
+  set(field: string, value: unknown): Promise<void>
+  unset(field: string): Promise<void>
+}
+
 export interface SettingsStoreOptions {
   /** Auto-clear time (ms) for the `saved` flash. Default 3000. */
   savedTtlMs?: number
@@ -228,6 +253,12 @@ export interface SettingsStore {
   commit(payload: any): Promise<any>
   /** Resolves the action's result (true when undefined), false on failure. */
   run(fn: () => Promise<unknown>): Promise<any>
+  /** Scope backend only: queue a Host refresh on the official scope. */
+  load?(): Promise<void>
+  /** Scope backend only: persist one field immediately (save-as-you-go). */
+  setField?(field: string, value: unknown): Promise<any>
+  /** Scope backend only: clear one field back to the composition layer. */
+  unsetField?(field: string): Promise<any>
 }
 
 export interface PanelStoreOptions {
@@ -301,6 +332,51 @@ export interface OverlayConfig {
   render: React.ComponentType<any>
 }
 
+export interface PluginCardHeader {
+  title: React.ReactNode
+  desc?: React.ReactNode
+  meta?: React.ReactNode
+}
+
+/** Content ctx handed to `content` / the card renderer. */
+export interface PluginCardContext {
+  ui: SettingsUi
+  store: SettingsStore
+  scope: SettingsScope | null
+  key: string
+}
+
+export type PluginCardShowIn = 'official-tab' | 'settings-page' | 'both'
+export type PluginCardChrome = 'full' | 'minimal'
+
+export interface PluginCardConfig {
+  /** Required = settings namespace = the official tab dispatch key. */
+  key: string
+  /** Aggregation-layer sort (keyed slots declare no order of their own). */
+  order?: number
+  /** Dictionary namespace id forwarded to the slot registration. */
+  locale?: string
+  /** Kit-rendered card head. */
+  header?: PluginCardHeader
+  /** Kit Rows form (recommended). */
+  fields?: RowField[]
+  /** Free content exit; receives { ui, store, scope, key }. */
+  content?: (ctx: PluginCardContext) => React.ReactNode
+  /** Where the card lands. Default 'official-tab'. */
+  showIn?: PluginCardShowIn
+  /** 'minimal' drops the kit card shell. Default 'full'. */
+  chrome?: PluginCardChrome
+  /** Optional fenced fallback transport for 'settings-page' without scope. */
+  api?: SettingsApi
+}
+
+export interface PluginCardResult {
+  key: string
+  store: SettingsStore
+  scope: SettingsScope | null
+  showIn: PluginCardShowIn
+}
+
 export interface SettingsUi {
   /** React.createElement alias. */
   h: typeof React.createElement
@@ -331,7 +407,8 @@ export interface SettingsUi {
   Dialog: React.ComponentType<DialogProps>
   ErrorBoundary: React.ComponentType<ErrorBoundaryProps>
   Rows: React.ComponentType<RowsProps>
-  createSettingsStore(api: SettingsApi, options?: SettingsStoreOptions): SettingsStore
+  /** api = fenced `{ get, update }` OR a bound settingsScope handle (scope backend, rc7). */
+  createSettingsStore(api: SettingsApi | SettingsScope, options?: SettingsStoreOptions): SettingsStore
   useSettings(store: SettingsStore): SettingsState
   Panel: React.ComponentType<PanelProps>
   createPanelStore(options?: PanelStoreOptions): PanelStore
@@ -340,6 +417,15 @@ export interface SettingsUi {
   section(config: SectionConfig): unknown
   /** Register a floating surface on the frame-wide `shell.overlay` slot (freedom path). */
   overlay(config: OverlayConfig): unknown
+  /**
+   * Register a rc7 official "plugin configuration" card (keyed
+   * `settings.plugin.item` by the settings namespace), persisted via the
+   * official `ctx.settingsScope` (save-as-you-go, revision-fenced). The store
+   * is the settingsScope backend of `createSettingsStore`. Returns null when
+   * the key is invalid/duplicate or settingsScope is unavailable for the
+   * official-tab path.
+   */
+  pluginCard(config: PluginCardConfig): PluginCardResult | null
 }
 
 declare const settingsUi: SettingsUi

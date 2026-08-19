@@ -1,6 +1,6 @@
 {
   "name": "dsh-settings-ui",
-  "version": "0.2.22",
+  "version": "0.3.0",
   "description": "DSH web plugin: unified settings-page UI kit. Provides the ctx.settingsUi client service — themed primitives + a settings store + a declarative form — so plugins register a settings section without hand-rolling their own UI. Backward compatible with direct settings.section registration.",
   "type": "module",
   "main": "lib/index.js",

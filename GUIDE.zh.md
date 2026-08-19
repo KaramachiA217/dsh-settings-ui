@@ -1,4 +1,4 @@
-# dsh-settings-ui kit — 使用与开发手册（v0.2.22）
+# dsh-settings-ui kit — 使用与开发手册（v0.3.0）
 
 > 面向「用 kit 给 DSH Web/桌面端开发 UI」的完整手册。API 以本仓库 `lib/client.js` 为准；本文与代码不一致时以代码为准，并请更新本文。
 
@@ -7,7 +7,7 @@
 - kit 是**纯客户端 Cordis 服务**：对外暴露 `ctx.settingsUi`（消费方 `inject: ['slots', 'settingsUi']`）；kit 自身注入面 `inject: ['slots', 'locale']`（`locale` = 官方 locale 插件服务，统计卡字典注册用；官方壳必带，缺席环境 kit 不激活）。
 - 一句话：**一套 `--dsw-*` token 统一样式 + 原子组件 + 设置状态机 + 两类注册入口（设置页卡片 / 自由浮层窗口）**，插件不再手写 CSS 与加载/保存状态。
 - 结构：`lib/index.js`（host 空壳）+ `lib/client.js`（全部能力，`window.__ModuleLoader__.load` CJS 工厂，无构建步骤，改完 `node --check`）；TypeScript 消费方用 `lib/client.d.ts`（export `./client` types 条件）。
-- 单测：`node --test test/`（沙箱内用 `node test/kit.test.mjs`，见 HANDOFF §6）；29 项。
+- 单测：`node --test test/`（沙箱内用 `node test/kit.test.mjs`，见 HANDOFF §6）；45 项。
 - 版本：`package.json.version` 与 `lib/client.js` 内 `KIT_VERSION` 常量**必须同步**；统计卡显示该版本号供核对。
 - 样式注入：`ensureStyle()` 幂等注入一次（id **带版本号** `dsh-settings-ui-style-v<ver>`，0.2.18 起——旧版 kit 副本先注入的样式不会阻塞新版），全部类名 `sui-` 前缀，不污染其它插件。
 
@@ -85,17 +85,28 @@ ui.Rows({
 
 ### 3.3 设置状态机 `ui.createSettingsStore` + `ui.useSettings`
 
+统一「加载/保存/busy/error/saved/revision 冲突」。**两种后端（0.3.0）**：
+
+- **fenced 路由**（rc6/传统）：`{ get, update }` 文档式读写，`commit` 保存整份 doc。
+- **settingsScope 后端**（rc7）：直接传 `ctx.settingsScope.bind({ namespace })` handle——每个字段 `set`/`unset` 保存即生效（revision 栅栏由官方 scope 保证，kit 不重造）；额外暴露 `setField(key, value)` / `unsetField(key)` / `load()`。
+
 ```js
+// fenced（原有）
 const store = ui.createSettingsStore({ get: () => call('get'), update: (p) => call('update', p) }, { savedTtlMs: 3000 })
-// store: { get, set, subscribe, refresh, commit, run }
+// scope（rc7；pluginCard 内部即此形态）
+const scope = ctx.settingsScope.bind({ namespace: 'my-plugin' })
+const store = ui.createSettingsStore(scope)
+store.setField('enabled', true)      // 保存即生效（scope.set）
+store.unsetField('enabled')          // 清回 composition 层（scope.unset）
+// store: { get, set, subscribe, refresh, commit, run, load?, setField?, unsetField? }
 const s = ui.useSettings(store)   // { doc, revision, busy, error, saved, loaded, dirty }
 ```
 
-- `refresh()`：调 `get()` 载入 `doc`；返回对象含 `revision` 自动提取；失败置 `error`。成功同时清 `dirty`。
-- `commit(payload)`：busy→`update(payload)`→refresh→`saved` 闪现（`savedTtlMs` 后自清，默认 3000ms）；**`settings-conflict` 错误码自动 refresh 后报错**（消费方无需处理）。**成功返回 `update()` 的结果**（结果为 undefined 时返回 `true`，兼容旧布尔用法），失败返回 `false`。
+- `refresh()`：调 `get()` 载入 `doc`；返回对象含 `revision` 自动提取；失败置 `error`。成功同时清 `dirty`。（scope 后端：载入 scope 快照 value/revision，订阅官方 scope 自动刷新。）
+- `commit(payload)`：busy→`update(payload)`→refresh→`saved` 闪现（`savedTtlMs` 后自清，默认 3000ms）；**`settings-conflict` 错误码自动 refresh 后报错**（消费方无需处理）。**成功返回 `update()` 的结果**（结果为 undefined 时返回 `true`，兼容旧布尔用法），失败返回 `false`。（scope 后端：把 payload 逐字段映射到 `scope.set`/`unset`，`undefined` 值 = unset；冲突恢复由官方 scope 完成，不会抛 `settings-conflict`。）
 - `run(fn)`：对增/删/启停等动作做 busy/错误/成功后刷新包裹（无整体 doc 保存时用这个；此时可只传 `{ get }`）。**成功返回 `fn()` 的结果**（undefined → `true`）。
-- `dirty`：任何 `set({ doc })`（表单本地编辑）置 true，`refresh`/成功 `commit`/`run` 后归 false——做「未保存更改」提示/离开确认直接读 `s.dirty`。
-- 语义对照：单一「保存一份 doc」用 `commit`；列表 CRUD/tab 动作用 `run`。
+- `dirty`：任何 `set({ doc })`（表单本地编辑）置 true，`refresh`/成功 `commit`/`run` 后归 false——做「未保存更改」提示/离开确认直接读 `s.dirty`。（scope 后端：官方 scope 回复快照是宿主事件、**不**置 dirty。）
+- 语义对照：单一「保存一份 doc」用 `commit`；列表 CRUD/tab 动作用 `run`；scope 保存即生效用 `setField`/`unsetField`。
 
 ### 3.4 设置页注册 `ui.section(config)`
 
@@ -139,7 +150,33 @@ ui.h(ui.Panel, { title, panel, onClose?, style? }, /* body children */)
 
 ### 3.6 通用设置统计卡（自动）
 
-kit 自动在「设置 → 通用设置」注册卡片：显示经 `ui.section()` **与 `ui.overlay()`** 接入的插件总数（实时跟随注册/卸载，ledger `registrant` 标记过滤）+ kit 版本号；点击展开插件名（浮层带「浮层」前缀）。**0.2.17 起卡片文案跟随官方 locale 服务**（kit 经 `ctx.locale.register('dsh-settings-ui', {zh,en})` 注册字典命名空间；locale 服务缺席时退回内置中文）。消费方零成本。
+kit 自动在「设置 → 通用设置」注册卡片：显示经 `ui.section()`、**`ui.overlay()` 与 `ui.pluginCard()`**（v0.3.0 并入）接入的插件总数（实时跟随注册/卸载，ledger `registrant` 标记过滤；pluginCard 条目显示其 key）+ kit 版本号；点击展开插件名（浮层带「浮层」前缀）。**0.2.17 起卡片文案跟随官方 locale 服务**（kit 经 `ctx.locale.register('dsh-settings-ui', {zh,en})` 注册字典命名空间；locale 服务缺席时退回内置中文）。消费方零成本。
+
+### 3.6b rc7 官方「插件配置」Tab 卡 `ui.pluginCard(config)`（v0.3.0）
+
+rc7 新范式 = 官方**插件配置 Tab**按 settings 命名空间派发 keyed 卡，持久化走官方 `ctx.settingsScope`（保存即生效、revision 栅栏）。`pluginCard()` 把它封装成「kit 卡壳 + scope 后端状态机」：
+
+```js
+const card = ui.pluginCard({
+  key: 'my-plugin',                 // 必填 = settings 命名空间 = Tab 派发键（白名单 ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$）
+  order: 10,                        // 聚合层排序（keyed 槽自身无 order）
+  locale: 'settings.myPlugin',      // 可选：透传 slot 字典 ns
+  header: { title, desc?, meta? },  // kit 渲染的卡头
+  fields: [ { key, type, label, hint? }, ... ],  // 推荐：kit Rows 表单
+  // content?: (ctx) => <element>   自由内容出口（ctx = { ui, store, scope, key }）
+  showIn: 'official-tab',           // 'official-tab' | 'settings-page' | 'both'
+  chrome: 'full',                   // 'full' | 'minimal'（minimal 只渲内容）
+  api: { get, update },             // 可选：settings-page 无 scope 时 fenced 回退
+})
+// card = { key, store, scope, showIn }；card.store 为 settingsScope 后端
+```
+
+- **注册**：`ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({ name:'settings.plugin.item', key, locale, registrant:'dsh-settings-ui' }, Card))`。keyed 槽未声明时 `slots.inject` 惰性等待，无需额外判断。
+- **传输** = `ctx.settingsScope.bind({ namespace: key })`——revision 栅栏与冲突恢复官方保证，kit 不重造（校准注：勿套 host 侧 `applies:'restart'` 范式）。
+- **self-protection**：`key` 白名单校验 + 重复 key 自查告警拒绝（官方 keyed 覆盖语义自我保护）。
+- **`settingsScope` 可选**：用 `ctx.get('settingsScope')` 探测（**不进 inject 硬依赖**）。缺席时 official-tab 给出清晰诊断并拒绝（说明缺了什么、后果是什么）；settings-page 可回退 fenced `api`。
+- **卡壳-内容子槽架构**：kit 渲染外部壳（卡头/内容区/状态条），内容走 `fields` Rows 或 `content` 自由出口——对齐三原则③不 import 官方卡 chrome。
+- 事件/字段编辑：`store.setField(k, v)` 保存即生效；`store.unsetField(k)` 清回 composition 层。
 
 ### 3.7 CSS 类速查（全部 `sui-` 前缀）
 
@@ -181,15 +218,17 @@ kit 自动在「设置 → 通用设置」注册卡片：显示经 `ui.section()
 
 ## 4. 便捷路径 vs 自由路径（kit 的定位）
 
-| | 便捷路径 | 自由路径 |
-|---|---|---|
-| 场景 | 配置/设置页卡片 | 任意悬浮窗口、助手、面板 |
-| 入口 | `ui.section(...)` | `ui.overlay(...)` + `ui.Panel` |
-| 状态 | `createSettingsStore`（加载/保存/冲突内建） | `createPanelStore`（开合/位置/锚点/置顶） |
-| 表单 | `ui.Rows` 声明式 | 原子组件自由组合 |
-| 代码量 | 数十行 | 数百行、完全可控 |
+| | rc7 便捷 | 便捷路径 | 自由路径 |
+|---|---|---|---|
+| 场景 | 官方「插件配置」Tab 配置卡 | 设置页配置卡片 | 任意悬浮窗口、助手、面板 |
+| 入口 | `ui.pluginCard(...)` | `ui.section(...)` | `ui.overlay(...)` + `ui.Panel` |
+| 状态 | `createSettingsStore`（settingsScope 后端；保存即生效） | `createSettingsStore`（fenced） | `createPanelStore`（开合/位置/锚点/置顶） |
+| 表单 | `ui.Rows`（可覆盖为 `content`） | `ui.Rows` 声明式 | 原子组件自由组合 |
+| 代码量 | 数十行 | 数十行 | 数百行、完全可控 |
 
-**开发者选择规则**：进设置页的配置 → 便捷路径；要常驻/悬浮/自定义交互 → 自由路径。两条路径共享全部原子与样式类，可混用（如助手同时注册设置卡 + 浮层）。
+**开发者选择规则**：新品配置界面 → rc7 便捷（`pluginCard()` 官方 Tab，家族单轨）；存量/rc6/headless 设置页 → 便捷 `section()`；要常驻/悬浮/自定义交互 → 自由路径。三条路径共享全部原子与样式类，可混用。
+
+**家族单轨说明（rc.7 对齐）**：rc7 官方教程已不再提 `settings.section`，「配置卡上车」由官方插件配置 Tab 承担。为避免「设置页一半、插件 Tab 一半」两轨碎片化，**家族新品一律走 `pluginCard()`（官方 Tab）**；存量 `section()` 仍完全支持、无需迁移。对齐三原则见 HANDoFF/DEVBOARD（契约层只用官方槽/服务、视觉层 token 对齐不硬编码、代码层不 import 官方卡 chrome）。
 
 ## 4b. 官方槽位边界与已知局限（契约层）
 
@@ -201,6 +240,7 @@ kit 的定位是「契约对齐官方、视觉自由」：**槽位映射、token
 | `sidebar.settings` | **单例**（single） | 侧栏「设置」入口只有官方一个，插件**不能叠加** |
 | `sidebar.footer.action` | **列表**（list，唯一附加槽） | 侧栏底部动作区**可叠加**，task-board 的入口就走这里（折叠动画、`[data-rail]` 圆形态） |
 | `settings.section` / `settings.general.item` | 列表（list） | 设置页内容可自由叠加（kit 的 `section()` 就映射到这里） |
+| `settings.plugin.item` | **keyed（按 settings 命名空间派发）** | 官方「插件配置」Tab 的配置卡位（rc7；kit 的 `pluginCard()` 映射到这里，注册必须带 `key`） |
 | `shell.overlay` | 列表（list） | 窗口最前层级浮层可自由叠加（kit 的 `overlay()` 映射到这里） |
 
 **由此带来的已知局限**：
@@ -220,6 +260,7 @@ kit 的定位是「契约对齐官方、视觉自由」：**槽位映射、token
 5. 注册项 `registrant` 标记别删（统计卡计数依赖）。
 6. 部署与更新链（tgz 重打、profile 换装、硬链接断链、重启壳）等**本机工作流见 `HANDOFF.md` §5/§6**——手册只承载 API 契约与通用踩坑。
 7. 消费方崩溃诊断：把手/入口等**放在错误边界外**，主体包 `ui.ErrorBoundary`（`{ title?, fallback?, onError? }`，0.2.13 起 kit 内置，无需再手抄 assistant 的 `AssistantBoundary` 模板）。
+8. `pluginCard`（v0.3.0）：`key` 必须匹配白名单 `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$` 且全家族唯一（kit 自查拒绝重复）；`settingsScope` 走 `ctx.get('settingsScope')` **可选**探测，headless/无设置面缺席时 official-tab 会拒绝注册并给出诊断——不要把它写进 `inject` 硬依赖，也别把 host 侧 `settings.watch`/`applies:'restart'` 范式套到卡上（scope 是保存即生效）。
 
 ## 6. 版本历史
 
