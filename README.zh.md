@@ -75,14 +75,15 @@ const plugin = {
 
 ## 安装（挂进 profile）
 
-与普通客户端插件一致：单包、`cordis.patch.yml` 单行装配、`dsh.client` 声明、提交 `lib/`。本包声明了 `dsh.bundle.patch`，是标准 bundle。**首选官方 CLI**（一步完成「加依赖 + 追加进 `dsh.profile.bundles`」，即官方手册的 tarball 安装流程）：
+与普通客户端插件一致：单包、`cordis.patch.yml` 单行装配、`dsh.client` 声明、提交 `lib/`。本包声明了 `dsh.bundle.patch`，是标准 bundle。**官方 npm 安装（首选）**——一步完成「加依赖 + reconcile 追加进 `dsh.profile.bundles`」：
 
 ```sh
-npm pack                        # 出 dsh-settings-ui-<ver>.tgz（含预构建 lib/，安装方零构建授权）
-dsh plugin --profile <name> add ./dsh-settings-ui-<ver>.tgz
+dsh plugin --profile <profile-name> add dsh-settings-ui
 ```
 
-等价的**手写 profile** 方式（与 CLI 产出的最终状态一致，二选一）：
+> npm latest 目前 **0.2.22**；0.4.0 发布后**同命令升级**（`dsh plugin --profile <profile-name> add dsh-settings-ui@latest`）。⚠️ 发布后 24h 内安装会撞 pnpm v11 `minimumReleaseAge` 供应链冷却期、静默回退旧版——在 profile 的 `pnpm-workspace.yaml` 加 `minimumReleaseAge: 0`，或等满 24h 再装。
+
+本地开发（可选，二选一）：`npm pack` 出 tgz 后 `dsh plugin --profile <profile-name> add ./dsh-settings-ui-<ver>.tgz`，或手写 profile：
 
 1. 在 profile 的 `package.json` 加依赖（`file:` 挂载 tgz；⚠️ rc.6 起 `link:` 会因 ESM 解析失败，一律用 tarball）。
 2. 在 `dsh.profile.bundles` 里加一行 `"dsh-settings-ui"`。

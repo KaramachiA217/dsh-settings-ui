@@ -9,18 +9,24 @@ A unified settings-page UI kit + floating-panel kit for DeepSeek Harness plugins
 
 ## Install
 
+Install from npm with the official CLI (one step: adds the dependency, then reconcile appends the package to `dsh.profile.bundles`):
+
 ```sh
-npm i dsh-settings-ui
+dsh plugin --profile <profile-name> add dsh-settings-ui
 ```
+
+> npm latest is currently **0.2.22**; when 0.4.0 publishes, upgrade with the same command (`dsh plugin --profile <profile-name> add dsh-settings-ui@latest`). If you install within 24h of a fresh publish, pnpm v11's `minimumReleaseAge` supply-chain cooldown silently falls back to the previous version — add `minimumReleaseAge: 0` to the profile's `pnpm-workspace.yaml`, or wait a day.
 
 Add it to the profile bundles (the host provides the peers — consumers do **not** declare it as a peer dependency while it is host-provided):
 
 ```json
 {
-  "dependencies": { "dsh-settings-ui": "npm:dsh-settings-ui" },
+  "dependencies": { "dsh-settings-ui": "^0.2.22" },
   "dsh": { "profile": { "bundles": ["dsh-base", "dsh-web-app", "dsh-settings-ui", "..."] } }
 }
 ```
+
+Local development (optional): `npm pack` to build the tarball, then `dsh plugin --profile <profile-name> add ./dsh-settings-ui-<ver>.tgz` (or a `file:` dependency).
 
 ## What you get
 

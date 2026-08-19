@@ -2,6 +2,16 @@
 
 > 面向「用 kit 给 DSH Web/桌面端开发 UI」的完整手册。API 以本仓库 `lib/client.js` 为准；本文与代码不一致时以代码为准，并请更新本文。
 
+## 0. 安装（官方 npm）
+
+对外用户安装 kit（一步完成「加依赖 + reconcile 追加进 `dsh.profile.bundles`」）：
+
+```sh
+dsh plugin --profile <profile-name> add dsh-settings-ui
+```
+
+npm latest 目前 **0.2.22**；0.4.0 发布后同命令升级（`add dsh-settings-ui@latest`）。本机开发/打包工作流见 `HANDOFF.md` §5/§6。
+
 ## 1. 定位与架构
 
 - kit 是**纯客户端 Cordis 服务**：对外暴露 `ctx.settingsUi`（消费方 `inject: ['slots', 'settingsUi']`）；kit 自身注入面 `inject: ['slots', 'locale']`（`locale` = 官方 locale 插件服务，统计卡字典注册用；官方壳必带，缺席环境 kit 不激活）。
