@@ -36,7 +36,7 @@ const React = createRequire(import.meta.url)('react')
 // Loaders / fakes
 // ---------------------------------------------------------------------------
 
-function loadBundle() {
+function loadBundle(opts = {}) {
   let spec = null
   // 事件桩：bundle 内 `window` 是传入的 win 对象（非全局），必须自带
   // add/removeEventListener——createPanelStore 0.2.19 起会挂 storage 监听。
@@ -52,6 +52,8 @@ function loadBundle() {
       const arr = handlers.get(type) || []
       handlers.set(type, arr.filter((f) => f !== fn))
     },
+    // 可选 localStorage 桩：样本页开发开关（specimenEnabled）会从这里读
+    ...(opts.storage ? { localStorage: opts.storage } : {}),
   }
   // The bundle is a classic browser script (no imports/exports); evaluate it
   // in a sandbox with only `window` and `document` provided.
@@ -95,7 +97,8 @@ function makeFakeSlots() {
       cb()
       return cb
     },
-    entries: () => entries,
+    // 按槽名过滤，与真实 slots 一致（无参调用返回全量，供既有断言使用）。
+    entries: (key) => (key ? entries.filter((e) => e.options.name === key) : entries),
     getVersion: () => version,
     subscribe(_key, listener) {
       listeners.add(listener)
@@ -111,7 +114,7 @@ function makeService(opts = {}) {
   // open; installLocale is boot-once and owned by the official plugin).
   const registeredDicts = []
   const locale = { register: (ns, dicts) => { registeredDicts.push({ ns, dicts }) } }
-  const loaded = loadBundle()
+  const loaded = loadBundle(opts)
   // Fake ctx.get: resolve settingsScope only when a scope service is supplied
   // (pluginCard probes it as an optional service; never inject-hard).
   const scopeSvc = opts.scopeSvc ?? null
@@ -183,8 +186,8 @@ function makeScopeService(initial = {}) {
   }
 }
 
-function makeStorage() {
-  const map = new Map()
+function makeSpecStorage(initial = {}) {
+  const map = new Map(Object.entries(initial))
   return {
     getItem: (k) => (map.has(k) ? map.get(k) : null),
     setItem: (k, v) => map.set(k, String(v)),
@@ -433,7 +436,7 @@ test('panel store: open/minimize/z/pos/anchor without persist', () => {
 })
 
 test('panel store: persist keeps pos/anchor/minimized but never open', () => {
-  const storage = makeStorage()
+  const storage = makeSpecStorage()
   globalThis.localStorage = storage
   try {
     const { service } = makeService()
@@ -640,7 +643,7 @@ test('Tabs carries WAI-ARIA roles and roving tabindex', () => {
 })
 
 test('panel store: resize sets size and persists', () => {
-  globalThis.localStorage = makeStorage()
+  globalThis.localStorage = makeSpecStorage()
   try {
     const { service } = makeService()
     const p = service.createPanelStore({ persist: 't.resize.v1' })
@@ -720,7 +723,7 @@ test('commit resolves the update result; run resolves the action result', async 
 // ---------------------------------------------------------------------------
 
 test('panel store: storage event merges remote persisted fields (cross-tab, 0.2.19)', () => {
-  const storage = makeStorage()
+  const storage = makeSpecStorage()
   globalThis.localStorage = storage
   try {
     const { service, winHandlers } = makeService()
@@ -1026,5 +1029,66 @@ test('pluginCard content free exit takes precedence over fields', () => {
   const html = renderToString(service.h(entry.render))
   assert.match(html, /custom-exit/, 'content free exit rendered')
   assert.match(html, /自定义内容/)
+})
+
+// ---------------------------------------------------------------------------
+// R7' UI 风格核对样本页（0.4.2）
+// ---------------------------------------------------------------------------
+
+const SPEC_FLAG = 'dsh-settings-ui:specimen'
+const SPEC_SECTION_ID = 'dsh-settings-ui.ui-specimens'
+const SPEC_OVERLAY_ID = 'dsh-settings-ui.ui-specimens.overlay'
+
+//（localStorage 桩复用上方的 makeSpecStorage）
+
+test('specimen page: V9 off by default — neither slot registered', () => {
+  const { slots } = makeService()
+  const ids = slots.entries().map((e) => e.options.id)
+  assert.equal(ids.includes(SPEC_SECTION_ID), false, '样本页分区默认不得注册（生产不可达）')
+  assert.equal(ids.includes(SPEC_OVERLAY_ID), false, '样本页浮层默认不得注册（生产不可达）')
+})
+
+test('specimen page: registered on both slots when flag is on', () => {
+  const { slots } = makeService({ storage: makeSpecStorage({ [SPEC_FLAG]: '1' }) })
+  const sec = slots.entries().find((e) => e.options.id === SPEC_SECTION_ID)
+  const ovl = slots.entries().find((e) => e.options.id === SPEC_OVERLAY_ID)
+  assert.ok(sec, '应注册 settings.section')
+  assert.ok(ovl, '应注册 shell.overlay')
+  assert.equal(sec.options.name, 'settings.section')
+  assert.equal(ovl.options.name, 'shell.overlay')
+  assert.equal(sec.options.order, 9000, '样本页分区排在导航末尾')
+  assert.equal(sec.options.registrant, 'dsh-settings-ui')
+})
+
+test('specimen page: renders all groups with class + token annotations (V10)', () => {
+  const { service, slots } = makeService({ storage: makeSpecStorage({ [SPEC_FLAG]: '1' }) })
+  const entry = slots.entries().find((e) => e.options.id === SPEC_SECTION_ID)
+  const html = renderToString(service.h(entry.render))
+  // 五个分组（令牌体检 + A/B/C/D + E–I 合并组）
+  for (const g of ['令牌体检', '按钮', '浮窗类', '输入类', '展示类']) {
+    assert.match(html, new RegExp(g), `分组缺失：${g}`)
+  }
+  // 样式来源标注：类名与 token 都要出现在页面上
+  assert.match(html, /sui-spec-src/, '应输出样式来源标注')
+  assert.match(html, /sui-btn-primary/, '应出现主按钮样本')
+  assert.match(html, /button-primary-fill/, '应标注主按钮 token')
+  assert.match(html, /sui-dialog/, '应标注 Dialog 类名')
+  // kit 未提供的组件如实标注占位，不伪造官方样本
+  assert.match(html, /未提供/, '未提供组件应标注占位')
+  for (const missing of ['Popover', 'Tooltip', 'Dropdown', 'Drawer']) {
+    assert.match(html, new RegExp(missing), `应标注缺失组件：${missing}`)
+  }
+})
+
+test('specimen page: excluded from the kit plugins count card', () => {
+  const { service, slots } = makeService({ storage: makeSpecStorage({ [SPEC_FLAG]: '1' }) })
+  service.section({ id: 'real-plugin', order: 10, label: '真实插件', render: () => null })
+  const card = slots.entries().find((e) => e.options.name === 'settings.general.item')
+  const html = renderToString(service.h(card.render))
+  // 计数徽标：样本页的 section + overlay 都被排除，只剩真实注册项
+  assert.match(html, /1 个/, '样本页不计入统计，真实注册项应计为 1 个')
+  assert.doesNotMatch(html, /dsh-settings-ui\.ui-specimens/, '样本页 id 不应出现在统计列表')
+  // 注：开关位于展开区，需点击展开才可见，SSR 快照覆盖不到（由人工/壳验证）
+  assert.match(html, /sui-kit-head/, '统计卡头部应渲染')
 })
 
