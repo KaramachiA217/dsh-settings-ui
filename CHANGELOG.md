@@ -6,7 +6,21 @@
 
 ## [Unreleased]
 
-- （暂无）
+### Fixed
+
+- **统计卡计数恒为「0 个」（真正根因，见 devflow/20-plan.md K4）**：官方 `SlotCore.register()` 产出的条目是**混层**形状——`entry.options` 只装 `{ key, id, order, label, priority }` 五项，`registrant` 挂在 **entry 顶层**。kit 此前的 `entry.registrant`（扁平）与 `e.options ?? e`（只查 options 层）两种读法都拿不到它，过滤恒 false。改为**两层都查**的 `fieldOf(e, name)`。
+- **令牌体检误报「未定义」（dev 实测 42 项中 33 项）**：`readTokens()` 只读 `getComputedStyle(document.documentElement)`，而 rc.2 把大量 `--dsw-alias-*` 定义在 `body[data-ds-dark-theme]` 上，暗色主题下 `:root` 探点取不到值。改为以 `body` 为主探点（自定义属性可继承，body 的计算值同时含自身定义与继承自 `:root` 的值、且自身定义优先）、`documentElement` 兜底。这是体检器**探测口径**缺陷，不是官方令牌缺失。
+- **令牌体检条目值被截断**：`.sui-spec-tokens` 列宽 280px → 360px，`.sui-spec-token-val` 上限 `96px` → `45%`（名称与值按 55%/45% 分配），长色值不再一律变成省略号。
+
+### Added
+
+- **样本页新增「L 组：插槽账本诊断」**（`SlotLedgerProbe`）：直接 dump 统计卡依赖的三个槽位的原始条目——槽位名、条目形状（嵌套/扁平）、`registrant` 值、id/key，以及 `options` 层与 entry 顶层**分别**的键名。用于一次性判定「计数为 0」属于注册侧还是计数侧的问题。
+
+### Changed
+
+- **测试桩 `makeFakeSlots` 改为与官方 SlotCore 同形的混层桩**（`makeSlotEntry`）——旧桩把 opts 整包塞进 `options`，与真实不同形，是上述计数缺陷能在 54 项绿灯下隐身的直接原因。新增测试 55 显式锁定该契约，并已做**反向验证**（退回旧读法后测试 52/54/55 立即失败）。
+- **L 组探针改走 props（不再依赖外层 `ctx`）**：`SlotLedgerProbe` 改为接受 `props.slots`，`SpecimenPage` 从 dsh 注入 face 拿 slots（测试/SSR 环境无 slots 时降级为 `null`，诊断显示「未传 slots」）。修复「dsh 真机 L 组报 `ctx is not defined` Error」（探针原本闭包了 `apply(ctx)` 外的 `ctx`，无法工作）。
+- **`.sui-spec-token` 加 `padding-left:4px`**：避免 `.sui-spec-samples` 的 12px 圆角内壁「压住」绿点（`.sui-spec-flag`），用户反馈「右上角绿色选项被圆角裁切、太靠边」。
 
 ## [0.4.1] - 2026-08-20
 

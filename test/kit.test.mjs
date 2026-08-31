@@ -75,18 +75,51 @@ function loadBundle(opts = {}) {
   return { plugin: spec.factory(requireStub), handlers }
 }
 
+/**
+ * 复刻官方 SlotCore.register 产出的**混层**条目形状。
+ *
+ * 2026-08-31 对 @deepseek-ai/dsh-client-ui-slots（dev 共享层实装 0.1.0-rc.7）
+ * 源码取证，真实条目形如：
+ *   entry.options = { key, id, order, label, priority }   ← 仅这五个
+ *   entry.registrant / .locale / .inject / .store / .select / .children
+ *                                                        ← 挂在 entry 顶层
+ *
+ * 旧桩把 opts 整包塞进 options，与真实不同形，直接导致「统计卡恒为 0 个」
+ * 的缺陷在测试里完全隐身（kit 的 (e.options || e) 读法在桩上能命中 registrant，
+ * 到线上却读不到）。桩必须与真实同形，否则测试绿而线上坏。
+ *
+ * 桩额外把槽名 `name` 挂在 entry 顶层供 entries(key) 过滤 —— 真实实现按
+ * records Map 分桶、不需要该字段；kit 不读 name，不影响被测逻辑。
+ */
+function makeSlotEntry(opts, render) {
+  const pick = (n) => (opts[n] !== undefined ? { [n]: opts[n] } : {})
+  return {
+    name: opts.name,
+    options: {
+      ...pick('key'),
+      ...pick('id'),
+      ...pick('order'),
+      ...pick('label'),
+      ...pick('priority'),
+    },
+    ...pick('registrant'),
+    ...pick('locale'),
+    ...pick('store'),
+    ...pick('select'),
+    ...pick('children'),
+    // Emulate the real slots runtime: compose the declared `inject` face
+    // into the props handed to the slot render function.
+    render: (props) => render({ ...(opts.inject ? opts.inject() : {}), ...(props ?? {}) }),
+  }
+}
+
 function makeFakeSlots() {
   const entries = []
   let version = 0
   const listeners = new Set()
   return {
     register(opts, render) {
-      const entry = {
-        options: opts,
-        // Emulate the real slots runtime: compose the declared `inject` face
-        // into the props handed to the slot render function.
-        render: (props) => render({ ...(opts.inject ? opts.inject() : {}), ...(props ?? {}) }),
-      }
+      const entry = makeSlotEntry(opts, render)
       entries.push(entry)
       version++
       return entry
@@ -98,7 +131,7 @@ function makeFakeSlots() {
       return cb
     },
     // 按槽名过滤，与真实 slots 一致（无参调用返回全量，供既有断言使用）。
-    entries: (key) => (key ? entries.filter((e) => e.options.name === key) : entries),
+    entries: (key) => (key ? entries.filter((e) => e.name === key) : entries),
     getVersion: () => version,
     subscribe(_key, listener) {
       listeners.add(listener)
@@ -251,10 +284,11 @@ test('section() registers with registrant marker and .sui-root wrapper', () => {
     inject: () => ({ api }),
     render: MyComp,
   })
-  const entries = slots.entries().filter((e) => e.options.name === 'settings.section')
+  const entries = slots.entries().filter((e) => e.name === 'settings.section')
   assert.equal(entries.length, 1)
+  // registrant 挂在 entry 顶层（官方 SlotCore 混层形状），不在 options 内
+  assert.equal(entries[0].registrant, 'dsh-settings-ui')
   const opts = entries[0].options
-  assert.equal(opts.registrant, 'dsh-settings-ui')
   assert.equal(opts.id, 'demo')
   assert.equal(opts.order, 300)
   assert.equal(typeof opts.label, 'function')
@@ -278,11 +312,11 @@ test('overlay() registers on shell.overlay with registrant marker', () => {
     inject: () => ({ face: 42 }),
     render: MyPanel,
   })
-  const e = slots.entries().find((x) => x.options.name === 'shell.overlay')
+  const e = slots.entries().find((x) => x.name === 'shell.overlay')
   assert.ok(e, 'overlay entry registered')
   assert.equal(e.options.id, 'ov1')
   assert.equal(e.options.order, 100)
-  assert.equal(e.options.registrant, 'dsh-settings-ui')
+  assert.equal(e.registrant, 'dsh-settings-ui')
   const el = e.render({ composed: true })
   assert.equal(el.type, service.ErrorBoundary, 'overlay auto-wraps ErrorBoundary since 0.2.19')
   const inner = el.props.children
@@ -293,10 +327,10 @@ test('overlay() registers on shell.overlay with registrant marker', () => {
 
 test('apply registers the General-settings kit stats card', () => {
   const { slots, registeredDicts } = makeService()
-  const e = slots.entries().find((x) => x.options.name === 'settings.general.item')
+  const e = slots.entries().find((x) => x.name === 'settings.general.item')
   assert.ok(e, 'stats card registered')
   assert.equal(e.options.id, 'settings-ui-kit-plugins')
-  assert.equal(e.options.locale, 'dsh-settings-ui', 'card declares its locale namespace')
+  assert.equal(e.locale, 'dsh-settings-ui', 'card declares its locale namespace')
   assert.equal(typeof e.render, 'function')
   // Dictionary registered through the official locale service contract.
   assert.equal(registeredDicts.length, 1)
@@ -844,18 +878,18 @@ test('pluginCard registers a keyed settings.plugin.item entry with registrant ma
   assert.ok(result, 'pluginCard resolves with scope present')
   assert.equal(result.key, 'demo')
   assert.equal(result.showIn, 'official-tab')
-  const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const e = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   assert.ok(e, 'keyed entry registered under settings.plugin.item')
-  assert.equal(e.options.registrant, 'dsh-settings-ui', 'registrant marker feeds the stats card')
-  assert.equal(e.options.locale, undefined)
+  assert.equal(e.registrant, 'dsh-settings-ui', 'registrant marker feeds the stats card')
+  assert.equal(e.locale, undefined)
 })
 
 test('pluginCard forwards a locale namespace to the slot registration', () => {
   const svc = makeScopeService()
   const { service, slots } = makeService({ scopeSvc: svc })
   service.pluginCard({ key: 'demo', locale: 'settings.demo' })
-  const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
-  assert.equal(e.options.locale, 'settings.demo')
+  const e = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
+  assert.equal(e.locale, 'settings.demo')
 })
 
 test('pluginCard rejects a key that fails the ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$ whitelist', () => {
@@ -866,7 +900,7 @@ test('pluginCard rejects a key that fails the ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$ 
     const svc = makeScopeService()
     const { service, slots } = makeService({ scopeSvc: svc })
     assert.equal(service.pluginCard({ key: 'Bad Key!', header: {} }), null, 'invalid key rejected')
-    const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'Bad Key!')
+    const e = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'Bad Key!')
     assert.ok(!e, 'no entry registered for an invalid key')
     assert.equal(warnings.length, 1, 'a clear warning is emitted')
     assert.match(String(warnings[0][0]), /非法 key/)
@@ -883,9 +917,9 @@ test('pluginCard rejects a duplicate key with a self-protection warning', () => 
     const svc = makeScopeService()
     const { service, slots } = makeService({ scopeSvc: svc })
     service.pluginCard({ key: 'dup' })
-    const before = slots.entries().filter((x) => x.options.name === 'settings.plugin.item').length
+    const before = slots.entries().filter((x) => x.name === 'settings.plugin.item').length
     assert.equal(service.pluginCard({ key: 'dup' }), null, 'duplicate key rejected')
-    const after = slots.entries().filter((x) => x.options.name === 'settings.plugin.item').length
+    const after = slots.entries().filter((x) => x.name === 'settings.plugin.item').length
     assert.equal(after, before, 'no second entry for a duplicate key')
     assert.equal(warnings.length, 1)
     assert.match(String(warnings[0][0]), /已在 settings.plugin.item 占位/)
@@ -902,7 +936,7 @@ test('pluginCard official-tab path bails with a diagnostic when settingsScope is
     // No scopeSvc supplied → ctx.get('settingsScope') resolves undefined.
     const { service, slots } = makeService()
     assert.equal(service.pluginCard({ key: 'headless' }), null)
-    const e = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'headless')
+    const e = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'headless')
     assert.ok(!e, 'no official-tab card registered without settingsScope')
     assert.equal(errors.length, 1, 'a diagnostic error is emitted')
     assert.match(String(errors[0][0]), /settingsScope 服务缺席/)
@@ -917,11 +951,11 @@ test('pluginCard showIn=settings-page registers settings.section instead (compat
   const { service, slots } = makeService({ scopeSvc: svc })
   const result = service.pluginCard({ key: 'demo', showIn: 'settings-page', order: 7, header: { title: 'Demo' } })
   assert.ok(result)
-  const s = slots.entries().find((x) => x.options.name === 'settings.section' && x.options.id === 'demo')
+  const s = slots.entries().find((x) => x.name === 'settings.section' && x.options.id === 'demo')
   assert.ok(s, 'settings-page lands on settings.section')
   assert.equal(s.options.order, 7)
-  assert.equal(s.options.registrant, 'dsh-settings-ui')
-  const k = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  assert.equal(s.registrant, 'dsh-settings-ui')
+  const k = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   assert.ok(!k, 'settings-page must not also register the keyed card')
 })
 
@@ -929,8 +963,8 @@ test('pluginCard showIn=both registers both the keyed card and a section', () =>
   const svc = makeScopeService()
   const { service, slots } = makeService({ scopeSvc: svc })
   assert.ok(service.pluginCard({ key: 'demo', showIn: 'both' }))
-  assert.ok(slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo'))
-  assert.ok(slots.entries().find((x) => x.options.name === 'settings.section' && x.options.id === 'demo'))
+  assert.ok(slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo'))
+  assert.ok(slots.entries().find((x) => x.name === 'settings.section' && x.options.id === 'demo'))
 })
 
 test('pluginCard kit chrome renders the legacy kit shell with header + body (markup)', () => {
@@ -942,7 +976,7 @@ test('pluginCard kit chrome renders the legacy kit shell with header + body (mar
     header: { title: 'Demo 卡', desc: '一句话说明' },
     fields: [{ key: 'enabled', type: 'switch', label: '启用' }],
   })
-  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const entry = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   const html = renderToString(service.h(entry.render))
   assert.match(html, /sui-plugincard/, 'kit card shell rendered')
   assert.match(html, /sui-plugincard-body/, 'content body rendered')
@@ -958,7 +992,7 @@ test('pluginCard official chrome is the default and renders collapsed (header on
     header: { title: 'Demo 卡', desc: '一句话说明' },
     fields: [{ key: 'timeout', type: 'number', label: '超时' }],
   })
-  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const entry = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   const html = renderToString(service.h(entry.render))
   assert.match(html, /sui-pcard/, 'official card shell rendered')
   assert.match(html, /sui-pcard-head/, 'disclosure header rendered')
@@ -980,7 +1014,7 @@ test('pluginCard official chrome defaultOpen renders fields + discard/save foote
       { key: 'name', type: 'text', label: '名称' },
     ],
   })
-  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const entry = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   const html = renderToString(service.h(entry.render))
   assert.match(html, /sui-pcard-open/, 'open state class applied')
   assert.match(html, /sui-pcard-body/, 'body rendered when open')
@@ -1007,7 +1041,7 @@ test('pluginCard official chrome dirty state: pending badge + staged value + sav
   // 0.4.0：官方模型 = stage 暂存（只置 dirty，不 commit、不 busy）——保存按钮
   // 应启用；放弃修改 refresh 丢弃。
   result.store.stage({ timeout: '123' })
-  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const entry = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   const html = renderToString(service.h(entry.render))
   assert.match(html, /sui-pcard-pending/, 'dirty pending badge rendered on header')
   assert.match(html, /未保存/, 'pending badge copy rendered')
@@ -1025,7 +1059,7 @@ test('pluginCard content free exit takes precedence over fields', () => {
     fields: [{ key: 'a', type: 'switch', label: '忽略我' }],
     content: () => service.h('div', { className: 'custom-exit' }, '自定义内容'),
   })
-  const entry = slots.entries().find((x) => x.options.name === 'settings.plugin.item' && x.options.key === 'demo')
+  const entry = slots.entries().find((x) => x.name === 'settings.plugin.item' && x.options.key === 'demo')
   const html = renderToString(service.h(entry.render))
   assert.match(html, /custom-exit/, 'content free exit rendered')
   assert.match(html, /自定义内容/)
@@ -1054,10 +1088,10 @@ test('specimen page: registered on both slots when flag is on', () => {
   const ovl = slots.entries().find((e) => e.options.id === SPEC_OVERLAY_ID)
   assert.ok(sec, '应注册 settings.section')
   assert.ok(ovl, '应注册 shell.overlay')
-  assert.equal(sec.options.name, 'settings.section')
-  assert.equal(ovl.options.name, 'shell.overlay')
+  assert.equal(sec.name, 'settings.section')
+  assert.equal(ovl.name, 'shell.overlay')
   assert.equal(sec.options.order, 9000, '样本页分区排在导航末尾')
-  assert.equal(sec.options.registrant, 'dsh-settings-ui')
+  assert.equal(sec.registrant, 'dsh-settings-ui')
 })
 
 test('specimen page: renders all groups with class + token annotations (V10)', () => {
@@ -1083,12 +1117,62 @@ test('specimen page: renders all groups with class + token annotations (V10)', (
 test('specimen page: excluded from the kit plugins count card', () => {
   const { service, slots } = makeService({ storage: makeSpecStorage({ [SPEC_FLAG]: '1' }) })
   service.section({ id: 'real-plugin', order: 10, label: '真实插件', render: () => null })
-  const card = slots.entries().find((e) => e.options.name === 'settings.general.item')
+  const card = slots.entries().find((e) => e.name === 'settings.general.item')
   const html = renderToString(service.h(card.render))
   // 计数徽标：样本页的 section + overlay 都被排除，只剩真实注册项
   assert.match(html, /1 个/, '样本页不计入统计，真实注册项应计为 1 个')
   assert.doesNotMatch(html, /dsh-settings-ui\.ui-specimens/, '样本页 id 不应出现在统计列表')
   // 注：开关位于展开区，需点击展开才可见，SSR 快照覆盖不到（由人工/壳验证）
   assert.match(html, /sui-kit-head/, '统计卡头部应渲染')
+})
+
+test('specimen page: toggle renders even with zero plugins (no deadlock)', () => {
+  // 回归：开关曾挂在 entries.map(...).concat([...]) 之后，entries 为 0 时
+  // 开关本身不渲染 —— 用户永远无法从关闭态打开样本页。开关必须无条件渲染。
+  const { service, slots } = makeService({ storage: makeSpecStorage() })
+  const card = slots.entries().find((e) => e.name === 'settings.general.item')
+  const html = renderToString(service.h(card.render, { defaultOpen: true }))
+  assert.match(html, /0 个/, '零插件时计数徽标应为 0 个')
+  assert.match(html, /sui-kit-empty/, '零插件时应显示空态文案')
+  assert.match(html, /UI 风格核对页（样本页）/, '零插件时样本页开关仍必须渲染')
+})
+
+test('specimen page: toggle renders alongside real plugins', () => {
+  const { service, slots } = makeService({ storage: makeSpecStorage() })
+  service.section({ id: 'real-plugin', order: 10, label: '真实插件', render: () => null })
+  const card = slots.entries().find((e) => e.name === 'settings.general.item')
+  const html = renderToString(service.h(card.render, { defaultOpen: true }))
+  assert.match(html, /真实插件/, '真实注册项应列出')
+  assert.match(html, /UI 风格核对页（样本页）/, '有插件时样本页开关也应渲染')
+})
+
+test('count card reads `registrant` from the entry TOP level (mixed-shape ledger)', () => {
+  // 回归（2026-08-31 线上缺陷：统计卡恒显示「0 个」）。
+  // 官方 SlotCore 产出的条目是混层形状：
+  //   entry.options = { key, id, order, label, priority }
+  //   entry.registrant / .locale / .inject            ← 挂在 entry 顶层
+  // kit 曾用 `(e.options || e)` 读字段：一旦命中 options 层就不再看顶层，
+  // registrant 恒为 undefined → 过滤恒 false → 计数永远 0。
+  // 本测试绕过 service API、直接往账本塞混层条目，把该契约锁死 —— 即使
+  // 将来把桩改回扁平形状，也能立刻暴露读数回归。
+  const { service, slots } = makeService({ storage: makeSpecStorage() })
+  slots.register(
+    { name: 'settings.section', id: 'mixed-shape', order: 10, label: '混层条目', registrant: 'dsh-settings-ui' },
+    () => null,
+  )
+  slots.register(
+    { name: 'shell.overlay', id: 'ov-mixed', order: 20, label: '混层浮层', registrant: 'dsh-settings-ui' },
+    () => null,
+  )
+  // 官方插件自行注册、不带 kit 标记的条目，不应计入
+  slots.register(
+    { name: 'settings.section', id: 'official-own', order: 30, label: '官方分区', registrant: 'dsh-web-app' },
+    () => null,
+  )
+  const card = slots.entries().find((e) => e.name === 'settings.general.item')
+  const html = renderToString(service.h(card.render, { defaultOpen: true }))
+  assert.match(html, /2 个/, '两个带 kit 标记的条目应计数')
+  assert.match(html, /混层条目/, 'kit 注册的 section 应列出')
+  assert.doesNotMatch(html, /官方分区/, '非 kit 注册项不应计入')
 })
 

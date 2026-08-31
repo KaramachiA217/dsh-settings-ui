@@ -2,3 +2,7 @@
 node_modules/
 
 *.tgz.bak
+
+# devflow/backup/ 是改造前的代码快照（85KB client.js 等），
+# 回滚语义由 git 本身承担，不入版本库。
+devflow/backup/
