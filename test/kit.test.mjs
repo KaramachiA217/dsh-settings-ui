@@ -1176,3 +1176,28 @@ test('count card reads `registrant` from the entry TOP level (mixed-shape ledger
   assert.doesNotMatch(html, /官方分区/, '非 kit 注册项不应计入')
 })
 
+
+test('specimen FAB demo stays a positioned ancestor (badge must not escape to the page corner)', () => {
+  // 回归（2026-08-31 线上缺陷：设置页右上角出现一个被圆角裁掉的绿色圆点）。
+  //
+  // 样本页 A8 组演示 .sui-fab 时，用内联 `position:static` 覆盖掉 .sui-fab 自身的
+  // `position:fixed`（目的是让演示件留在文档流里、不要真的浮在视口上）。
+  // 但 .sui-fab-badge 是 `position:absolute; top:-3px; right:-3px` 的绿色圆点 ——
+  // 父元素一旦变成 static 就不再是包含块，badge 改为相对**更外层**的定位祖先定位，
+  // 于是飞到设置页右上角、紧贴「打开配置文件」按钮并被面板圆角裁掉。
+  //
+  // 正确写法是 `position:relative`：同样不脱离文档流，但保留包含块资格，
+  // badge 回到 FAB 自己的右上角。本测试锁死该契约。
+  const { service, slots } = makeService({ storage: makeSpecStorage({ [SPEC_FLAG]: '1' }) })
+  const entry = slots.entries().find((e) => e.options.id === SPEC_SECTION_ID)
+  const html = renderToString(service.h(entry.render))
+
+  // FAB 演示件必须存在
+  assert.match(html, /sui-fab/, '样本页应渲染 FAB 演示件')
+  // 关键：绝不能是 static —— 否则 badge 会脱离包含块飞到页面角落
+  assert.doesNotMatch(html, /sui-fab[^>]*position:\s*static/, 'FAB 演示件不得用 position:static（badge 会脱离包含块）')
+  // 必须是 relative：不脱离文档流且仍是包含块
+  assert.match(html, /sui-fab[^>]*position:\s*relative/, 'FAB 演示件应用 position:relative 保留包含块资格')
+  // badge 本身仍要渲染（它是被裁掉的那个绿色元素）
+  assert.match(html, /sui-fab-badge/, 'FAB badge 应渲染')
+})
